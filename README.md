@@ -1,8 +1,8 @@
 # C socket server
-A simple C socket server that accepts one client connection at a time and prints the message it's sent. 
+A simple C socket server that accepts many client connections at a time and prints the message it's sent using the `select()` system call from C. 
 
 ## Features
-* Accepts a single TCP client connection at a time.
+* Accepts multiple TCP connections at a time using the `select()` system call.
 * Prints client messages to the console.
 * Easy to compile and run on Linux, macOS, and with minor adjustments, Windows.
 
@@ -27,5 +27,5 @@ Type the messages in the netcat terminal and press Enter - the server will displ
 > On Windows, you can use `telet localhost 8080` or install netcat for Windows.
 
 ## Notes
-* The server currently handles one client at a time. Additional clients must wait until the current client disconnects.
+* The server currently handles a max of `FD_SETSIZE` clients at once.
 * Messages are printed as-is, no special formatting.
