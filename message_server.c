@@ -9,6 +9,12 @@
 #define MAX_BUFF_SIZE 1024
 #define PORT 8080
 
+struct client {
+    char username[32];
+    int authenticated;
+}
+
+void initialize_clients(struct client *c);
 void setup_server(int *server);
 void handle_new_connection(int s, fd_set *main, int *maxfd);
 void handle_new_client(int c, int s, int *maxfd, fd_set *main);
@@ -16,9 +22,11 @@ void update_maxfd(int s, int *maxfd, fd_set *main);
 
 int main(void)
 {
+    struct client clients[FD_SETSIZE];
     int server, maxfd;
     fd_set main, readfds;
 
+    initialize_clients(&clients);
     setup_server(&server);
 
     FD_ZERO(&main);
@@ -46,6 +54,13 @@ int main(void)
     }
 
     exit(EXIT_SUCCESS);
+}
+
+void initialize_clients(struct client *c) {
+    for (i = 0; i < FD_SETSIZE; i++) {
+        c[i].authenticated = 0;
+        c[i].username = '\0';
+    }
 }
 
 void handle_new_client(int c, int s, int *maxfd, fd_set *main) {
