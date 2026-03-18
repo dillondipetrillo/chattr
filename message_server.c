@@ -6,18 +6,20 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define AUTH "AUTH"
 #define MAX_BUFF_SIZE 1024
 #define PORT 8080
 
 struct client {
     char username[32];
     int authenticated;
-}
+};
 
+void handle_client(int c, int s, int *maxfd, fd_set *main);
+void handle_new_socket(int s, fd_set *main, int *maxfd);
 void initialize_clients(struct client *c);
+void parse_command(char *buffer, char **cmd, char **action);
 void setup_server(int *server);
-void handle_new_connection(int s, fd_set *main, int *maxfd);
-void handle_new_client(int c, int s, int *maxfd, fd_set *main);
 void update_maxfd(int s, int *maxfd, fd_set *main);
 
 int main(void)
@@ -26,7 +28,7 @@ int main(void)
     int server, maxfd;
     fd_set main, readfds;
 
-    initialize_clients(&clients);
+    initialize_clients(clients);
     setup_server(&server);
 
     FD_ZERO(&main);
@@ -44,11 +46,9 @@ int main(void)
         for (int i = 0; i <= maxfd; i++) {
             if (FD_ISSET(i, &readfds)) {
                 if (i == server)
-                    // handle new connection
-                    handle_new_connection(i, &main, &maxfd);
+                    handle_new_socket(i, &main, &maxfd);
                 else
-                    // handle new client
-                    handle_new_client(i, server, &maxfd, &main);
+                    handle_client(i, server, &maxfd, &main);
             }
         }
     }
@@ -57,14 +57,15 @@ int main(void)
 }
 
 void initialize_clients(struct client *c) {
-    for (i = 0; i < FD_SETSIZE; i++) {
+    for (int i = 0; i < FD_SETSIZE; i++) {
         c[i].authenticated = 0;
-        c[i].username = '\0';
+        c[i].username[0] = '\0';
     }
 }
 
-void handle_new_client(int c, int s, int *maxfd, fd_set *main) {
+void handle_client(int c, int s, int *maxfd, fd_set *main) {
     char buffer[MAX_BUFF_SIZE];
+    char *cmd, *action;
     ssize_t bytes_received;
     if ((bytes_received = recv(
         c,
@@ -72,7 +73,10 @@ void handle_new_client(int c, int s, int *maxfd, fd_set *main) {
         sizeof(buffer) - 1, 0)) > 0
     ) {
        buffer[bytes_received] = '\0';
-        printf("Received(socket %d): %s", c, buffer);
+        parse_command(buffer, &cmd, &action);
+        if (!strcmp(cmd, AUTH)) {
+            perror("Error: Not a recognized command.\n");
+        }
         return;
     }
 
@@ -88,7 +92,30 @@ void handle_new_client(int c, int s, int *maxfd, fd_set *main) {
         update_maxfd(s, maxfd, main);
 }
 
-void handle_new_connection(int s, fd_set *main, int *maxfd) {
+void parse_command(char *buffer, char **cmd, char **action) {
+    *cmd = buffer;
+    *action = NULL;
+    for (int i = 0; buffer[i]; i++) {
+        if (buffer[i] == ' ') {
+            buffer[i] = '\0';
+            *action = &buffer[i+1];
+            break;
+        }
+    }
+    if (*action != NULL) {
+        while (**action == ' ') (*action)++;
+        ssize_t len = strlen(*action);
+        while (len > 0 &&
+            ((*action)[len - 1] == ' ' ||
+            (*action)[len - 1] == '\n')
+        ) {
+            (*action)[len - 1] = '\0';
+            len--;
+        }
+    }
+}
+
+void handle_new_socket(int s, fd_set *main, int *maxfd) {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
         perror("Error: Cannot accept incoming client.\n");
