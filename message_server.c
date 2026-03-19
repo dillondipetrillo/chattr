@@ -7,16 +7,17 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define AUTH "AUTH"
-#define MAX_BUFF_SIZE 1024
-#define PORT 8080
-#define USERNAME_MAX_LEN 32
+#define AUTH "AUTH"         // Command to authenticate users
+#define MAX_BUFF_SIZE 1024  // Maximum buffer size
+#define PORT 8080           // Default port for socket
+#define USERNAME_MAX_LEN 32 // Max length for usernames
 
 struct client {
     char username[USERNAME_MAX_LEN];
     int authenticated;
 };
 
+// Function prototypes
 int  can_add_username(
     char *arg, int *maxfd, int c, struct client *clients
 );
@@ -67,6 +68,13 @@ int main(void)
     exit(EXIT_SUCCESS);
 }
 
+/**
+ * Function: initialize_clients
+ * ------------------------------------
+ * Purpose: Set all possible clients as unauthenticated and
+ * empty usernames
+ * Returns: void
+ */
 void initialize_clients(struct client *c) {
     for (int i = 0; i < FD_SETSIZE; i++) {
         c[i].authenticated = 0;
@@ -74,6 +82,15 @@ void initialize_clients(struct client *c) {
     }
 }
 
+/**
+ * Function: handle_client
+ * ------------------------------------
+ * Purpose: Handle operations coming in from clients and
+ * run commands based on command given as input if it
+ * matches one of the macros for commands. Also closes
+ * client socket and handles cleaning the clients array.
+ * Returns: void
+ */
 void handle_client(
     int c, int s, int *maxfd, fd_set *main, struct client *clients
 ) {
@@ -121,11 +138,27 @@ void handle_client(
     }
 }
 
+/**
+ * Function: reset_client
+ * ------------------------------------
+ * Purpose: Resets the authenticated and username variables
+ * for a specific client, typically when closing the socket.
+ * Returns: void
+ */
 void reset_client(int c, struct client *clients) {
     clients[c].authenticated = 0;
     clients[c].username[0] = '\0';
 }
 
+/**
+ * Function: can_add_username
+ * ------------------------------------
+ * Purpose: Once the input is split into command and
+ * argument, validate that the argument(username) is a
+ * certain length, valid chars, and is not taken or resetting
+ * an already authenticated client.
+ * Returns: 0 when false and 1 when true
+ */
 int can_add_username(
     char *arg, int *maxfd, int c, struct client *clients
 ) {
@@ -150,6 +183,14 @@ int can_add_username(
     return 1;
 }
 
+/**
+ * Function: is_valid_username
+ * ------------------------------------
+ * Purpose: Loops through argument(username) and ensures
+ * it contains only valid characters for usernames - alphanumeric
+ * chars or underscores.
+ * Returns: 0 when false and 1 when true
+ */
 int is_valid_username(char *arg) {
     while (*arg) {
         if (!isalnum((unsigned char)*arg) && *arg != '_') {
@@ -160,6 +201,14 @@ int is_valid_username(char *arg) {
     return 1;
 }
 
+/**
+ * Function: parse_command
+ * ------------------------------------
+ * Purpose: Takens an input string from client and tries
+ * to search for a space char to separate the command from
+ * the argument.
+ * Returns: void
+ */
 void parse_command(char *buffer, char **cmd, char **arg) {
     *cmd = buffer;
     *arg = NULL;
@@ -172,6 +221,13 @@ void parse_command(char *buffer, char **cmd, char **arg) {
     }
 }
 
+/**
+ * Function: validate_command
+ * ------------------------------------
+ * Purpose: Trims the command and argument before checking
+ * if either is not set.
+ * Returns: 0 (false) if either is not set or 1 (true) if set
+ */
 int validate_command(char *cmd, char *arg) {
     cmd = trim_arg(cmd);
     arg = trim_arg(arg);
@@ -186,6 +242,13 @@ int validate_command(char *cmd, char *arg) {
     return 1;
 }
 
+/**
+ * Function: trim_arg
+ * ------------------------------------
+ * Purpose: Trim the leading and trailing white spaces from
+ * a string.
+ * Returns: pointer to the trimmed string
+ */
 char *trim_arg(char *s) {
     if (s == NULL) return NULL;
 
@@ -204,6 +267,13 @@ char *trim_arg(char *s) {
     return s;
 }
 
+/**
+ * Function: handle_new_socket
+ * ------------------------------------
+ * Purpose: Connects new socket connects using accept()
+ * system call. Prints error if not successful.
+ * Returns: void
+ */
 void handle_new_socket(int s, fd_set *main, int *maxfd) {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
@@ -217,6 +287,13 @@ void handle_new_socket(int s, fd_set *main, int *maxfd) {
     printf("Connected to client on socket %d...\n", client_socket);
 }
 
+/**
+ * Function: setup_server
+ * ------------------------------------
+ * Purpose: Sets up a server socket to accept client sockets
+ * to connect to.
+ * Returns: void
+ */
 void setup_server(int *server) {
     *server = socket(PF_INET, SOCK_STREAM, 0);
     if (*server == -1) {
@@ -245,6 +322,14 @@ void setup_server(int *server) {
     }
 }
 
+/**
+ * Function: update_maxfd
+ * ------------------------------------
+ * Purpose: Iterate through the max length of fd_set and check
+ * if index of iteration is an active client and greater than
+ * the last.
+ * Returns: void
+ */
 void update_maxfd(int s, int *maxfd, fd_set *main) {
     int new_maxfd = s;
     for (int i = 0; i < FD_SETSIZE; i++) {
