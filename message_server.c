@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,18 +10,28 @@
 #define AUTH "AUTH"
 #define MAX_BUFF_SIZE 1024
 #define PORT 8080
+#define USERNAME_MAX_LEN 32
 
 struct client {
-    char username[32];
+    char username[USERNAME_MAX_LEN];
     int authenticated;
 };
 
-void handle_client(int c, int s, int *maxfd, fd_set *main);
+int  can_add_username(
+    char *arg, int *maxfd, int c, struct client *clients
+);
+void handle_client(
+    int c, int s, int *maxfd, fd_set *main, struct client *clients
+);
 void handle_new_socket(int s, fd_set *main, int *maxfd);
 void initialize_clients(struct client *c);
-void parse_command(char *buffer, char **cmd, char **action);
+int  is_valid_username(char *arg);
+void parse_command(char *buffer, char **cmd, char **arg);
+void reset_client(int c, struct client *clients);
 void setup_server(int *server);
+char *trim_arg(char *s);
 void update_maxfd(int s, int *maxfd, fd_set *main);
+int  validate_command(char *cmd, char *arg);
 
 int main(void)
 {
@@ -39,7 +50,7 @@ int main(void)
     while (1) {
         readfds = main;
         if (select(maxfd + 1, &readfds, NULL, NULL, NULL) == -1) {
-            perror("Error: Select encountered an error.\n");
+            printf("Error: Select encountered an error.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -48,7 +59,7 @@ int main(void)
                 if (i == server)
                     handle_new_socket(i, &main, &maxfd);
                 else
-                    handle_client(i, server, &maxfd, &main);
+                    handle_client(i, server, &maxfd, &main, clients);
             }
         }
     }
@@ -63,62 +74,140 @@ void initialize_clients(struct client *c) {
     }
 }
 
-void handle_client(int c, int s, int *maxfd, fd_set *main) {
+void handle_client(
+    int c, int s, int *maxfd, fd_set *main, struct client *clients
+) {
     char buffer[MAX_BUFF_SIZE];
-    char *cmd, *action;
-    ssize_t bytes_received;
-    if ((bytes_received = recv(
+    char *cmd, *arg;
+    ssize_t bytes_received = recv(
         c,
         buffer,
-        sizeof(buffer) - 1, 0)) > 0
-    ) {
-       buffer[bytes_received] = '\0';
-        parse_command(buffer, &cmd, &action);
-        if (!strcmp(cmd, AUTH)) {
-            perror("Error: Not a recognized command.\n");
-        }
+        sizeof(buffer) - 1,
+        0
+    );
+
+    // Socket is either closed or encountered an error
+    if (bytes_received <= 0) {
+        char *msg = (bytes_received == 0) ?
+            "Closed socket" :
+            "Error: Couldn't receieve stream on socket";
+        printf("%s %d\n", msg, c);
+        close(c);
+        reset_client(c, clients);
+        FD_CLR(c, main);
+        if (c == *maxfd)
+            update_maxfd(s, maxfd, main);
         return;
     }
-
-    if (bytes_received == 0) {
-        printf("Closed socket %d\n", c);
-    } else if (bytes_received == -1) {
-        printf("Error: Socket %d couldn't receieve stream.\n", c);
+    
+    // Socket receieved input with no error
+    buffer[bytes_received] = '\0';
+    parse_command(buffer, &cmd, &arg);
+    if (validate_command(cmd, arg)) {
+        // Valid command and argument, handle command
+        if (strcmp(cmd, AUTH) == 0 &&
+            can_add_username(arg, maxfd, c, clients)
+        ) {
+            clients[c].authenticated = 1;
+            strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
+            clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
+            printf("OK: %s is authenticated.\n", clients[c].username);
+            printf("Connected clients\n");
+            for (int i = 0; i <= *maxfd; i++) {
+                printf("%s ", clients[i].username);
+            }
+            printf("\n");
+        }
     }
-
-    close(c);
-    FD_CLR(c, main);
-    if (c == *maxfd)
-        update_maxfd(s, maxfd, main);
 }
 
-void parse_command(char *buffer, char **cmd, char **action) {
+void reset_client(int c, struct client *clients) {
+    clients[c].authenticated = 0;
+    clients[c].username[0] = '\0';
+}
+
+int can_add_username(
+    char *arg, int *maxfd, int c, struct client *clients
+) {
+    if (strlen(arg) >= USERNAME_MAX_LEN) {
+        printf("Error: username is too long.\n");
+        return 0;
+    }
+    if (!is_valid_username(arg)) {
+        printf("Error: not a valid username format.\n");
+        return 0;
+    }
+    if (clients[c].authenticated) {
+        printf("Error: client already has a username.\n");
+        return 0;
+    }
+    for (int i = 0; i <= *maxfd; i++) {
+        if (strcmp(arg, clients[i].username) == 0) {
+            printf("Error: username is already taken.\n");
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int is_valid_username(char *arg) {
+    while (*arg) {
+        if (!isalnum((unsigned char)*arg) && *arg != '_') {
+            return 0;
+        }
+        arg++;
+    }
+    return 1;
+}
+
+void parse_command(char *buffer, char **cmd, char **arg) {
     *cmd = buffer;
-    *action = NULL;
+    *arg = NULL;
     for (int i = 0; buffer[i]; i++) {
         if (buffer[i] == ' ') {
             buffer[i] = '\0';
-            *action = &buffer[i+1];
+            *arg = &buffer[i+1];
             break;
         }
     }
-    if (*action != NULL) {
-        while (**action == ' ') (*action)++;
-        ssize_t len = strlen(*action);
-        while (len > 0 &&
-            ((*action)[len - 1] == ' ' ||
-            (*action)[len - 1] == '\n')
-        ) {
-            (*action)[len - 1] = '\0';
-            len--;
-        }
+}
+
+int validate_command(char *cmd, char *arg) {
+    cmd = trim_arg(cmd);
+    arg = trim_arg(arg);
+    if (cmd == NULL || *cmd == '\0') {
+        printf("Error: command not recognized.\n");
+        return 0;
     }
+    if (arg == NULL || *arg == '\0') {
+        printf("Error: argument not provided.\n");
+        return 0;
+    }
+    return 1;
+}
+
+char *trim_arg(char *s) {
+    if (s == NULL) return NULL;
+
+    // Skip leading spaces
+    while (*s == ' ') s++;
+
+    // Trim trailing spaces/newlines
+    size_t len = strlen(s);
+    while (len > 0 &&
+        (s[len-1] == ' ' || s[len-1] == '\n')
+    ) {
+        s[len-1] = '\0';
+        len--;
+    }
+
+    return s;
 }
 
 void handle_new_socket(int s, fd_set *main, int *maxfd) {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
-        perror("Error: Cannot accept incoming client.\n");
+        printf("Error: Cannot accept incoming client.\n");
         return;
     }
 
@@ -131,7 +220,7 @@ void handle_new_socket(int s, fd_set *main, int *maxfd) {
 void setup_server(int *server) {
     *server = socket(PF_INET, SOCK_STREAM, 0);
     if (*server == -1) {
-        perror("Error: Cannot create socket.\n");
+        printf("Error: Cannot create socket.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -146,12 +235,12 @@ void setup_server(int *server) {
         (struct sockaddr *) &address,
         sizeof(address)) == -1
     ) {
-        perror("Error: Cannot bind socket to address.\n");
+        printf("Error: Cannot bind socket to address.\n");
         exit(EXIT_FAILURE);
     }
 
     if (listen(*server, 4) == -1) {
-        perror("Error: Cannot start listening.\n");
+        printf("Error: Cannot start listening.\n");
         exit(EXIT_FAILURE);
     }
 }
