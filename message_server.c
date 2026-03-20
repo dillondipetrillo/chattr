@@ -32,7 +32,7 @@ void reset_client(int c, struct client *clients);
 void setup_server(int *server);
 char *trim_arg(char *s);
 void update_maxfd(int s, int *maxfd, fd_set *main);
-int  validate_command(char *cmd, char *arg);
+int  validate_command(char **cmd, char **arg);
 
 int main(void)
 {
@@ -120,7 +120,7 @@ void handle_client(
     // Socket receieved input with no error
     buffer[bytes_received] = '\0';
     parse_command(buffer, &cmd, &arg);
-    if (validate_command(cmd, arg)) {
+    if (validate_command(&cmd, &arg)) {
         // Valid command and argument, handle command
         if (strcmp(cmd, AUTH) == 0 &&
             can_add_username(arg, maxfd, c, clients)
@@ -129,11 +129,6 @@ void handle_client(
             strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
             clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
             printf("OK: %s is authenticated.\n", clients[c].username);
-            printf("Connected clients\n");
-            for (int i = 0; i <= *maxfd; i++) {
-                printf("%s ", clients[i].username);
-            }
-            printf("\n");
         }
     }
 }
@@ -228,14 +223,14 @@ void parse_command(char *buffer, char **cmd, char **arg) {
  * if either is not set.
  * Returns: 0 (false) if either is not set or 1 (true) if set
  */
-int validate_command(char *cmd, char *arg) {
-    cmd = trim_arg(cmd);
-    arg = trim_arg(arg);
-    if (cmd == NULL || *cmd == '\0') {
+int validate_command(char **cmd, char **arg) {
+    *cmd = trim_arg(*cmd);
+    *arg = trim_arg(*arg);
+    if (*cmd == NULL || **cmd == '\0') {
         printf("Error: command not recognized.\n");
         return 0;
     }
-    if (arg == NULL || *arg == '\0') {
+    if (*arg == NULL || **arg == '\0') {
         printf("Error: argument not provided.\n");
         return 0;
     }
