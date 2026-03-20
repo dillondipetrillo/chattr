@@ -1,9 +1,10 @@
 # C socket server
-A simple C socket server that accepts many client connections at a time and prints the message it's sent using the `select()` system call from C. 
+A simple C socket server that accepts many client connections at a time and prints the message it's sent using the `select()` system call from C. Handles simple authentication with AUTH command to add a username, and SEND to send a message.
 
 ## Features
 * Accepts multiple TCP connections at a time using the `select()` system call.
-* Prints client messages to the console.
+* Authenticates users with `AUTH <username>` command.
+* Prints client messages to the console with `SEND <message>` command.
 * Easy to compile and run on Linux, macOS, and with minor adjustments, Windows.
 
 ## Requirements
@@ -24,6 +25,7 @@ The server will start and listen on port 8080
 You can send messages to the server using netcat(`nc`):
 `nc localhost 8080`
 Type the messages in the netcat terminal and press Enter - the server will display them.
+First, authenticate user with `AUTH <username>`. Once authenticated, you can send messages to the server using `SEND <message>`.
 > On Windows, you can use `telet localhost 8080` or install netcat for Windows.
 
 ## Notes
