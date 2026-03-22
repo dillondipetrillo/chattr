@@ -3,6 +3,7 @@ A simple C socket server that accepts many client connections at a time and prin
 
 ## Features
 * Accepts multiple TCP connections at a time using the `select()` system call.
+* Uses `\n` for message framing to determine end of input line.
 * Authenticates users with `AUTH <username>` command.
 * Prints client messages to the console with `SEND <message>` command.
 * Easy to compile and run on Linux, macOS, and with minor adjustments, Windows.
@@ -19,7 +20,7 @@ A simple C socket server that accepts many client connections at a time and prin
 
 ## Running the server
 `./message_server`
-The server will start and listen on port 8080
+The server will start and listen on port 8080 (Can be changed with macro `PORT`)
 
 ## Testing the server
 You can send messages to the server using netcat(`nc`):
@@ -30,4 +31,4 @@ First, authenticate user with `AUTH <username>`. Once authenticated, you can sen
 
 ## Notes
 * The server currently handles a max of `FD_SETSIZE` clients at once.
-* Messages are printed as-is, no special formatting.
+* Messages are trimmed before printing.
