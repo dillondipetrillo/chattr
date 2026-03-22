@@ -8,31 +8,46 @@
 #include <unistd.h>
 
 #define AUTH "AUTH"         // Command to authenticate users
-#define MAX_BUFF_SIZE 1024  // Maximum buffer size
+#define MAX_LINE_SIZE 1024  // Maximum length for client buffer
+#define MAX_BUFF_SIZE 4096  // Maximum buffer size
 #define PORT 8080           // Default port for socket
+#define SEND "SEND"         // Command to send a message
 #define USERNAME_MAX_LEN 32 // Max length for usernames
 
 struct client {
-    char username[USERNAME_MAX_LEN];
     int authenticated;
+    char buffer[MAX_BUFF_SIZE];
+    int buffer_len;
+    char username[USERNAME_MAX_LEN];
 };
 
 // Function prototypes
 int  can_add_username(
-    char *arg, int *maxfd, int c, struct client *clients
+    char *arg, int *maxfd,
+    int c, struct client *clients
 );
 void handle_client(
-    int c, int s, int *maxfd, fd_set *main, struct client *clients
+    int c, int s, int *maxfd,
+    fd_set *main, struct client *clients
+);
+void handle_close_socket(
+    int bytes_received, int c,
+    struct client *clients, fd_set *main,
+    int *maxfd, int s
 );
 void handle_new_socket(int s, fd_set *main, int *maxfd);
 void initialize_clients(struct client *c);
 int  is_valid_username(char *arg);
-void parse_command(char *buffer, char **cmd, char **arg);
+void process_input(
+    int c, int *maxfd,
+    char *read_line, struct client *clients
+);
 void reset_client(int c, struct client *clients);
 void setup_server(int *server);
+void split_input(char *buffer, char **cmd, char **arg);
 char *trim_arg(char *s);
 void update_maxfd(int s, int *maxfd, fd_set *main);
-int  validate_command(char **cmd, char **arg);
+int  validate_input(char **cmd, char **arg);
 
 int main(void)
 {
@@ -50,7 +65,13 @@ int main(void)
 
     while (1) {
         readfds = main;
-        if (select(maxfd + 1, &readfds, NULL, NULL, NULL) == -1) {
+        if (
+            select(
+                maxfd + 1,
+                &readfds,
+                NULL, NULL, NULL
+            ) == -1
+        ) {
             printf("Error: Select encountered an error.\n");
             exit(EXIT_FAILURE);
         }
@@ -60,7 +81,13 @@ int main(void)
                 if (i == server)
                     handle_new_socket(i, &main, &maxfd);
                 else
-                    handle_client(i, server, &maxfd, &main, clients);
+                    handle_client(
+                        i,
+                        server, 
+                        &maxfd,
+                        &main,
+                        clients
+                    );
             }
         }
     }
@@ -78,6 +105,7 @@ int main(void)
 void initialize_clients(struct client *c) {
     for (int i = 0; i < FD_SETSIZE; i++) {
         c[i].authenticated = 0;
+        c[i].buffer_len = 0;
         c[i].username[0] = '\0';
     }
 }
@@ -94,43 +122,144 @@ void initialize_clients(struct client *c) {
 void handle_client(
     int c, int s, int *maxfd, fd_set *main, struct client *clients
 ) {
-    char buffer[MAX_BUFF_SIZE];
-    char *cmd, *arg;
+    char temp_buff[MAX_BUFF_SIZE];
     ssize_t bytes_received = recv(
         c,
-        buffer,
-        sizeof(buffer) - 1,
+        temp_buff,
+        sizeof(temp_buff) - 1,
         0
     );
 
-    // Socket is either closed or encountered an error
+    // Socket was either closed or encountered an error
     if (bytes_received <= 0) {
-        char *msg = (bytes_received == 0) ?
-            "Closed socket" :
-            "Error: Couldn't receieve stream on socket";
-        printf("%s %d\n", msg, c);
-        close(c);
-        reset_client(c, clients);
-        FD_CLR(c, main);
-        if (c == *maxfd)
-            update_maxfd(s, maxfd, main);
+        handle_close_socket(
+            bytes_received, c,
+            clients, main,
+            maxfd, s
+        );
+        return;
+    }
+
+    // Too many characters entered to fit into client buffer
+    if (clients[c].buffer_len + bytes_received > MAX_BUFF_SIZE) {
+        printf("Error: too many characters entered.\n");
         return;
     }
     
-    // Socket receieved input with no error
-    buffer[bytes_received] = '\0';
-    parse_command(buffer, &cmd, &arg);
-    if (validate_command(&cmd, &arg)) {
-        // Valid command and argument, handle command
-        if (strcmp(cmd, AUTH) == 0 &&
-            can_add_username(arg, maxfd, c, clients)
-        ) {
-            clients[c].authenticated = 1;
-            strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
-            clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
-            printf("OK: %s is authenticated.\n", clients[c].username);
+    // Socket receieved input with no error.
+    // Copy receieved input into client buffer
+    // and process it.
+    memcpy(
+        clients[c].buffer + clients[c].buffer_len,
+        temp_buff,
+        bytes_received
+    );
+    clients[c].buffer_len += bytes_received;
+    char *buf = clients[c].buffer;
+
+    for (int i = 0; i < clients[c].buffer_len; i++) {
+        if (buf[i] == '\n') {
+            if (i >= MAX_LINE_SIZE) {
+                printf("Error: User input is too long.\n");
+            } else {
+                char read_line[MAX_LINE_SIZE];
+                memcpy(read_line, buf, i);
+                read_line[i] = '\0';
+
+                process_input(c, maxfd, read_line, clients);
+            }
+
+            // Move client buffer pointer to position
+            // after the \n.
+            memmove(
+                buf, buf + i + 1,
+                clients[c].buffer_len - (i + 1)
+            );
+            clients[c].buffer_len -= (i + 1);
+            // Trick, after loop iteration is over, i++
+            // runs and sets i back to 0.
+            i = -1;
         }
     }
+}
+
+/**
+ * Function: process_input
+ * ------------------------------------
+ * Purpose: Takes the line read from the client buffer and
+ * does operations to split, validate line, and determine the
+ * command from user. If it's a valid command, it runs the
+ * operations associated with that command. Otherwise it prints
+ * an error.
+ * Returns: void
+ */
+void process_input(
+    int c, int *maxfd,
+    char *read_line, struct client *clients
+) {
+    char *cmd, *arg;
+    split_input(read_line, &cmd, &arg);
+    if (validate_input(&cmd, &arg)) {
+        // Valid command and argument, handle command
+        if (strcmp(cmd, AUTH) == 0) {
+            if (can_add_username(arg, maxfd, c, clients)) {
+                clients[c].authenticated = 1;
+                strncpy(
+                    clients[c].username,
+                    arg,
+                    USERNAME_MAX_LEN - 1
+                );
+                clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
+                printf(
+                    "OK: %s is authenticated.\n",
+                    clients[c].username
+                );
+            }
+        } else if (strcmp(cmd, SEND) == 0) {
+            if (clients[c].authenticated)
+                printf("[%s] %s\n", clients[c].username, arg);
+            else
+                printf("Need to authenticate to send message.\n");
+        } else
+            printf("Error: command not recognized.\n");
+    }
+}
+
+/**
+ * Function: handle_close_socket
+ * ------------------------------------
+ * Purpose: Handle operations to close a socket connected to
+ * a client. Prints message based on if client was
+ * authenticated or not, or if it was closed because of an
+ * error.
+ * Returns: void
+ */
+void handle_close_socket(
+    int bytes_received,
+    int c,
+    struct client *clients,
+    fd_set *main,
+    int *maxfd,
+    int s
+) {
+    if (bytes_received == 0) {
+        if (clients[c].authenticated) {
+            printf("Client '%s' disconnected (socket %d)\n",
+                clients[c].username, c);
+        } else {
+            printf(
+                "Unauthenticated client disconnected (socket %d)\n",
+                c
+            );
+        }
+    } else {
+        printf("Error: Couldn't receieve stream on socket %d\n", c);
+    }
+    close(c);
+    reset_client(c, clients);
+    FD_CLR(c, main);
+    if (c == *maxfd)
+        update_maxfd(s, maxfd, main);
 }
 
 /**
@@ -142,6 +271,7 @@ void handle_client(
  */
 void reset_client(int c, struct client *clients) {
     clients[c].authenticated = 0;
+    clients[c].buffer_len = 0;
     clients[c].username[0] = '\0';
 }
 
@@ -197,14 +327,14 @@ int is_valid_username(char *arg) {
 }
 
 /**
- * Function: parse_command
+ * Function: split_input
  * ------------------------------------
  * Purpose: Takens an input string from client and tries
  * to search for a space char to separate the command from
  * the argument.
  * Returns: void
  */
-void parse_command(char *buffer, char **cmd, char **arg) {
+void split_input(char *buffer, char **cmd, char **arg) {
     *cmd = buffer;
     *arg = NULL;
     for (int i = 0; buffer[i]; i++) {
@@ -217,17 +347,17 @@ void parse_command(char *buffer, char **cmd, char **arg) {
 }
 
 /**
- * Function: validate_command
+ * Function: validate_input
  * ------------------------------------
  * Purpose: Trims the command and argument before checking
  * if either is not set.
  * Returns: 0 (false) if either is not set or 1 (true) if set
  */
-int validate_command(char **cmd, char **arg) {
+int validate_input(char **cmd, char **arg) {
     *cmd = trim_arg(*cmd);
     *arg = trim_arg(*arg);
     if (*cmd == NULL || **cmd == '\0') {
-        printf("Error: command not recognized.\n");
+        printf("Error: command not provided.\n");
         return 0;
     }
     if (*arg == NULL || **arg == '\0') {
