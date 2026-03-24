@@ -1,34 +1,119 @@
-# C socket server
-A simple C socket server that accepts many client connections at a time and prints the message it's sent using the `select()` system call from C. Handles simple authentication with AUTH command to add a username, and SEND to send a message.
+# C Socket Chat Server
+
+A multi-client, event-driven chat server written in C using `select()`, supporting user authentication and real-time messaging between connected clients.
+
+This project focuses on low-level networking, system design, and protocol development.
 
 ## Features
-* Accepts multiple TCP connections at a time using the `select()` system call.
-* Uses `\n` for message framing to determine end of input line.
-* Authenticates users with `AUTH <username>` command.
-* Prints client messages to the console with `SEND <message>` command.
-* Easy to compile and run on Linux, macOS, and with minor adjustments, Windows.
+*  Multi-client support using `select()`
+*  Per-client state management
+*  Username authentication (`AUTH`)
+*  Real-time messaging between users (`SEND`)
+*  Custom input buffering and message framing (`\n`-delimited)
+*  Graceful client disconnect handling
+*  Input validation (usernames, commands, buffer limits)
 
-## Requirements
-* C compiler (e.g., `gcc`, `clang`, or MSVC for Windows)
-* POSIX-compatible system for Linux/macOS (Windows users need `Winsock2` initialization
+## Architecture Overview
 
-## Compilation
-### Linux/macOS
-`gcc message_server.c -o message_server`
-### Windows (using MinGW)
-`gcc message_server.c -o message_server.exe -lws2_32`
+This server is built around an **event-driven model**:
 
-## Running the server
-`./message_server`
-The server will start and listen on port 8080 (Can be changed with macro `PORT`)
+* Uses `select()` to monitor multiple sockets
+* Maintains a `struct client` per file descriptor
+* Each client has:
+    * Authentication state
+    * Username
+    * Input buffer for partial reads
 
-## Testing the server
-You can send messages to the server using netcat(`nc`):
-`nc localhost 8080`
-Type the messages in the netcat terminal and press Enter - the server will display them.
-First, authenticate user with `AUTH <username>`. Once authenticated, you can send messages to the server using `SEND <message>`.
-> On Windows, you can use `telet localhost 8080` or install netcat for Windows.
+### Core Concept: Message Framing
 
-## Notes
-* The server currently handles a max of `FD_SETSIZE` clients at once.
-* Messages are trimmed before printing.
+Since TCP is a stream protocol, messages are not guaranteed to arrive in full.
+
+This server:
+
+* Accumulates incoming bytes into a per-client buffer
+* Processes input only when a newline (`\n`) is detected
+* Handles:
+    * Partial messages
+    * Multiple messages in a single read
+
+## Supported Commands
+### 1. Authenticate User
+
+```AUTH <username>\n```
+
+Example:
+
+```AUTH dillon```
+
+Behavior:
+* Assigns a unique username to the client
+* Rejects:
+    * Duplicate usernames
+    * Invalid characters
+    * Already authenticated clients
+
+### 2. Send Message
+
+```SEND <username> <message>\n```
+
+Example:
+
+```SEND user123 hello there```
+
+Behavior:
+
+* Sends a message to another authenticated client
+* Output on receiver’s terminal:
+```[dillon] hello there```
+
+* Rejects:
+    * Sending to self
+    * Non-existent users
+    * Unauthenticated sender
+
+## How to Run
+1. Compile
+```gcc -o server message_server.c```
+
+2. Start Server
+```./server```
+
+3. Connect Clients (in separate terminals)
+```nc localhost 8080```
+
+## Key Implementation Details
+### Per-Client Buffering
+
+Each client has:
+
+```
+char buffer[MAX_BUFF_SIZE];
+int buffer_len;
+```
+
+Incoming data is:
+
+* Appended via `memcpy`
+* Parsed when `\n` is detected
+* Shifted using `memmove` after processing
+
+### Command Parsing
+
+Input is split into:
+
+* `cmd` (command)
+* `arg` (arguments)
+
+Then validated and routed:
+
+```
+if (strcmp(cmd, AUTH) == 0) { ... }
+else if (strcmp(cmd, SEND) == 0) { ... }
+```
+
+### Message Routing
+
+Messages are:
+
+* Constructed using `snprintf`
+* Delivered using `send()` to the recipient’s socket

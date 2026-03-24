@@ -36,6 +36,9 @@ void handle_close_socket(
     int *maxfd, int s
 );
 void handle_new_socket(int s, fd_set *main, int *maxfd);
+void handle_send_message(
+    char *arg, int *maxfd,
+    int c, struct client *clients);
 void initialize_clients(struct client *c);
 int  is_valid_username(char *arg);
 void process_input(
@@ -199,29 +202,82 @@ void process_input(
 ) {
     char *cmd, *arg;
     split_input(read_line, &cmd, &arg);
-    if (validate_input(&cmd, &arg)) {
-        // Valid command and argument, handle command
-        if (strcmp(cmd, AUTH) == 0) {
-            if (can_add_username(arg, maxfd, c, clients)) {
-                clients[c].authenticated = 1;
-                strncpy(
-                    clients[c].username,
-                    arg,
-                    USERNAME_MAX_LEN - 1
-                );
-                clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
-                printf(
-                    "OK: %s is authenticated.\n",
-                    clients[c].username
-                );
-            }
-        } else if (strcmp(cmd, SEND) == 0) {
-            if (clients[c].authenticated)
-                printf("[%s] %s\n", clients[c].username, arg);
-            else
-                printf("Need to authenticate to send message.\n");
-        } else
-            printf("Error: command not recognized.\n");
+    if (!validate_input(&cmd, &arg))
+        return;
+        
+    // Valid command and argument, handle command
+    if (strcmp(cmd, AUTH) == 0) {
+        if (can_add_username(arg, maxfd, c, clients)) {
+            clients[c].authenticated = 1;
+            strncpy(
+                clients[c].username,
+                arg,
+                USERNAME_MAX_LEN - 1
+            );
+            clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
+            printf(
+                "OK: %s is authenticated.\n",
+                clients[c].username
+            );
+        }
+    } else if (strcmp(cmd, SEND) == 0) {
+        if (clients[c].authenticated)
+            handle_send_message(arg, maxfd, c, clients);
+        else
+            printf("Need to authenticate to send message.\n");
+    } else
+        printf("Error: command not recognized.\n");
+}
+
+/**
+ * Function: handle_send_message
+ * ------------------------------------
+ * Purpose: Handle operations to extract username and
+ * message to send to specified user.
+ * Returns: void
+ */
+void handle_send_message(
+    char *arg, int *maxfd,
+    int c, struct client *clients
+) {
+    char *receiver, *message;
+    split_input(arg, &receiver, &message);
+    if (!validate_input(&receiver, &message))
+    return;
+    
+    // Refuse sending message to self
+    if (strcmp(clients[c].username, receiver) == 0) {
+        printf("Error: can't send message to self.\n");
+        return;
+    }
+
+    char full_message[MAX_BUFF_SIZE];
+    snprintf(
+        full_message,
+        sizeof(full_message),
+        "[%s] %s\n",
+        clients[c].username, message
+    );
+
+    int found = 0;
+    for (int i = 0; i <= *maxfd; i++) {
+        if (clients[i].authenticated &&
+            strcmp(
+            clients[i].username,
+            receiver) == 0
+        ) {
+            if (send(
+                    i, full_message,
+                    strlen(full_message), 0) < 0
+            )
+                printf("Error: couldn't send message.\n");
+            found = 1;
+            break;
+        }
+    }
+    
+    if (!found) {
+        printf("Error: no user found.\n");
     }
 }
 
