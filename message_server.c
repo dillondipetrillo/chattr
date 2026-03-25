@@ -243,16 +243,17 @@ void process_input(
  */
 void send_error(int c, char *err_msg) {
     char buffer[MAX_LINE_SIZE];
+    char *ptr = buffer;
     snprintf(buffer, sizeof(buffer), "ERROR: %s\n", err_msg);
     int err_msg_len = strlen(buffer);
     ssize_t err_bytes_sent;
     while (err_msg_len > 0) {
         err_bytes_sent = send(
-            c, buffer, strlen(buffer), 0
+            c, ptr, err_msg_len, 0
         );
         if (err_bytes_sent < 0)
             printf("Error sending error message.\n");
-        *buffer += err_bytes_sent;
+        ptr += err_bytes_sent;
         err_msg_len -= err_bytes_sent;
     }
 }
@@ -286,6 +287,7 @@ void handle_send_message(
         "[%s] %s\n",
         clients[c].username, message
     );
+    char *ptr = full_message;
 
     ssize_t bytes_sent;
     int found = 0;
@@ -299,7 +301,7 @@ void handle_send_message(
             found = 1;
             while (message_len > 0) {
                 bytes_sent = send(
-                    i, full_message,
+                    i, ptr,
                     message_len, 0
                 );
                 if (bytes_sent < 0) {
@@ -308,7 +310,7 @@ void handle_send_message(
                         "couldn't send message.\n"
                     );
                 }
-                *full_message += bytes_sent;
+                ptr += bytes_sent;
                 message_len -= bytes_sent;
             }
             break;
