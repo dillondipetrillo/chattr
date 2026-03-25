@@ -46,11 +46,12 @@ void process_input(
     char *read_line, struct client *clients
 );
 void reset_client(int c, struct client *clients);
+void send_error(int c, char *err_msg);
 void setup_server(int *server);
 void split_input(char *buffer, char **cmd, char **arg);
 char *trim_arg(char *s);
 void update_maxfd(int s, int *maxfd, fd_set *main);
-int  validate_input(char **cmd, char **arg);
+int  validate_input(int c, char **cmd, char **arg);
 
 int main(void)
 {
@@ -75,7 +76,9 @@ int main(void)
                 NULL, NULL, NULL
             ) == -1
         ) {
-            printf("Error: Select encountered an error.\n");
+            printf(
+                "Error: Select encountered an error.\n"
+            );
             exit(EXIT_FAILURE);
         }
 
@@ -145,7 +148,7 @@ void handle_client(
 
     // Too many characters entered to fit into client buffer
     if (clients[c].buffer_len + bytes_received > MAX_BUFF_SIZE) {
-        printf("Error: too many characters entered.\n");
+        send_error(c, "too many characters entered.");
         return;
     }
     
@@ -163,7 +166,7 @@ void handle_client(
     for (int i = 0; i < clients[c].buffer_len; i++) {
         if (buf[i] == '\n') {
             if (i >= MAX_LINE_SIZE) {
-                printf("Error: User input is too long.\n");
+                send_error(c, "User input is too long.");
             } else {
                 char read_line[MAX_LINE_SIZE];
                 memcpy(read_line, buf, i);
@@ -202,7 +205,7 @@ void process_input(
 ) {
     char *cmd, *arg;
     split_input(read_line, &cmd, &arg);
-    if (!validate_input(&cmd, &arg))
+    if (!validate_input(c, &cmd, &arg))
         return;
         
     // Valid command and argument, handle command
@@ -224,9 +227,34 @@ void process_input(
         if (clients[c].authenticated)
             handle_send_message(arg, maxfd, c, clients);
         else
-            printf("Need to authenticate to send message.\n");
+            send_error(
+                c,
+                "Need to authenticate to send message."
+            );
     } else
-        printf("Error: command not recognized.\n");
+        send_error(c, "Error: command not recognized.");
+}
+
+/**
+ * Function: send_error
+ * ------------------------------------
+ * Purpose: Sends error messages to clients.
+ * Returns: void
+ */
+void send_error(int c, char *err_msg) {
+    char buffer[MAX_LINE_SIZE];
+    snprintf(buffer, sizeof(buffer), "ERROR: %s\n", err_msg);
+    int err_msg_len = strlen(buffer);
+    ssize_t err_bytes_sent;
+    while (err_msg_len > 0) {
+        err_bytes_sent = send(
+            c, buffer, strlen(buffer), 0
+        );
+        if (err_bytes_sent < 0)
+            printf("Error sending error message.\n");
+        *buffer += err_bytes_sent;
+        err_msg_len -= err_bytes_sent;
+    }
 }
 
 /**
@@ -242,12 +270,12 @@ void handle_send_message(
 ) {
     char *receiver, *message;
     split_input(arg, &receiver, &message);
-    if (!validate_input(&receiver, &message))
+    if (!validate_input(c, &receiver, &message))
     return;
     
     // Refuse sending message to self
     if (strcmp(clients[c].username, receiver) == 0) {
-        printf("Error: can't send message to self.\n");
+        send_error(c, "can't send message to self.");
         return;
     }
 
@@ -259,25 +287,36 @@ void handle_send_message(
         clients[c].username, message
     );
 
+    ssize_t bytes_sent;
     int found = 0;
+    int message_len = strlen(full_message);
     for (int i = 0; i <= *maxfd; i++) {
         if (clients[i].authenticated &&
             strcmp(
             clients[i].username,
             receiver) == 0
         ) {
-            if (send(
-                    i, full_message,
-                    strlen(full_message), 0) < 0
-            )
-                printf("Error: couldn't send message.\n");
             found = 1;
+            while (message_len > 0) {
+                bytes_sent = send(
+                    i, full_message,
+                    message_len, 0
+                );
+                if (bytes_sent < 0) {
+                    send_error(
+                        c,
+                        "couldn't send message.\n"
+                    );
+                }
+                *full_message += bytes_sent;
+                message_len -= bytes_sent;
+            }
             break;
         }
     }
-    
+
     if (!found) {
-        printf("Error: no user found.\n");
+        send_error(c, "no user found.");
     }
 }
 
@@ -344,20 +383,20 @@ int can_add_username(
     char *arg, int *maxfd, int c, struct client *clients
 ) {
     if (strlen(arg) >= USERNAME_MAX_LEN) {
-        printf("Error: username is too long.\n");
+        send_error(c, "username is too long.");
         return 0;
     }
     if (!is_valid_username(arg)) {
-        printf("Error: not a valid username format.\n");
+        send_error(c, "not a valid username format.");
         return 0;
     }
     if (clients[c].authenticated) {
-        printf("Error: client already has a username.\n");
+        send_error(c, "client already has a username.");
         return 0;
     }
     for (int i = 0; i <= *maxfd; i++) {
         if (strcmp(arg, clients[i].username) == 0) {
-            printf("Error: username is already taken.\n");
+            send_error(c, "username is already taken.");
             return 0;
         }
     }
@@ -409,15 +448,15 @@ void split_input(char *buffer, char **cmd, char **arg) {
  * if either is not set.
  * Returns: 0 (false) if either is not set or 1 (true) if set
  */
-int validate_input(char **cmd, char **arg) {
+int validate_input(int c, char **cmd, char **arg) {
     *cmd = trim_arg(*cmd);
     *arg = trim_arg(*arg);
     if (*cmd == NULL || **cmd == '\0') {
-        printf("Error: command not provided.\n");
+        send_error(c, "command not provided.");
         return 0;
     }
     if (*arg == NULL || **arg == '\0') {
-        printf("Error: argument not provided.\n");
+        send_error(c, "argument not provided.");
         return 0;
     }
     return 1;
