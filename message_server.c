@@ -28,23 +28,26 @@ struct client {
 };
 
 // Function prototypes
-int  can_add_username(char *arg, int *maxfd, int c, struct client *clients);
-void handle_client(int c, int s, int *maxfd, fd_set *main,
+int can_add_username(const char *arg, const int *maxfd, const int c,
+    const struct client *clients);
+void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client *clients);
-void handle_close_socket(int bytes_received, int c, struct client *clients,
-    fd_set *main, int *maxfd, int s);
-void handle_new_socket(int s, fd_set *main, int *maxfd);
-void handle_send_message(char *arg, int *maxfd, int c, struct client *clients);
+void handle_close_socket(const int bytes_received, const int c, const int s,
+    struct client *clients, fd_set *main, int *maxfd);
+void handle_new_socket(const int s, int *maxfd, fd_set *main);
+void handle_send_message(char *arg, const int *maxfd, const int c,
+    const struct client *clients);
 void initialize_clients(struct client *c);
-int  is_valid_username(char *arg);
-void process_input(int c, int *maxfd, char *read_line, struct client *clients);
-void reset_client(int c, struct client *clients);
+int  is_valid_username(const char *arg);
+void process_input(const int c, const int *maxfd, char *read_line,
+    struct client *clients);
+void reset_client(const int c, struct client *clients);
 void send_error(int c, char *err_msg);
-void setup_server(int *server);
+int setup_server(void);
 void split_input(char *buffer, char **cmd, char **arg);
 char *trim_arg(char *s);
-void update_maxfd(int s, int *maxfd, fd_set *main);
-int  validate_input(int c, char **cmd, char **arg);
+int update_maxfd(const int s, const fd_set *main);
+int  validate_input(const int c, char **cmd, char **arg);
 
 int main(void)
 {
@@ -53,7 +56,7 @@ int main(void)
     fd_set main, readfds;
 
     initialize_clients(clients);
-    setup_server(&server);
+    server = setup_server();
 
     FD_ZERO(&main);
     FD_ZERO(&readfds);
@@ -68,12 +71,12 @@ int main(void)
         }
 
         for (int i = 0; i <= maxfd; i++) {
-            if (FD_ISSET(i, &readfds)) {
-                if (i == server)
-                    handle_new_socket(i, &main, &maxfd);
-                else
-                    handle_client(i, server, &maxfd, &main, clients);
-            }
+            if (!FD_ISSET(i, &readfds))
+                continue;
+            if (i == server)
+                handle_new_socket(i, &maxfd, &main);
+            else
+                handle_client(i, server, &maxfd, &main, clients);
         }
     }
 
@@ -89,7 +92,7 @@ void initialize_clients(struct client *c)
     }
 }
 
-void handle_client(int c, int s, int *maxfd, fd_set *main,
+void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client *clients)
 {
     char temp_buff[MAX_BUFF_SIZE];
@@ -97,7 +100,7 @@ void handle_client(int c, int s, int *maxfd, fd_set *main,
 
     // Socket was either closed or encountered an error
     if (bytes_received <= 0) {
-        handle_close_socket(bytes_received, c, clients, main, maxfd, s);
+        handle_close_socket(bytes_received, c, s, clients, main, maxfd);
         return;
     }
 
@@ -108,8 +111,7 @@ void handle_client(int c, int s, int *maxfd, fd_set *main,
     }
     
     // Socket receieved input with no error.
-    // Copy receieved input into client buffer
-    // and process it.
+    // Copy receieved input into client buffer and process it.
     memcpy(clients[c].buffer + clients[c].buffer_len, temp_buff,
         bytes_received);
     clients[c].buffer_len += bytes_received;
@@ -127,18 +129,17 @@ void handle_client(int c, int s, int *maxfd, fd_set *main,
                 process_input(c, maxfd, read_line, clients);
             }
 
-            // Move client buffer pointer to position
-            // after the \n.
+            // Move client buffer pointer to position after the \n.
             memmove(buf, buf + i + 1, clients[c].buffer_len - (i + 1));
             clients[c].buffer_len -= (i + 1);
-            // Trick, after loop iteration is over, i++
-            // runs and sets i back to 0.
+            // After loop iteration is over, i++ runs and sets i back to 0.
             i = -1;
         }
     }
 }
 
-void process_input(int c, int *maxfd, char *read_line, struct client *clients)
+void process_input(const int c, const int *maxfd, char *read_line,
+    struct client *clients)
 {
     char *cmd, *arg;
     split_input(read_line, &cmd, &arg);
@@ -178,7 +179,8 @@ void send_error(int c, char *err_msg)
     }
 }
 
-void handle_send_message(char *arg, int *maxfd, int c, struct client *clients)
+void handle_send_message(char *arg, const int *maxfd, const int c,
+    const struct client *clients)
 {
     char *receiver, *message;
     split_input(arg, &receiver, &message);
@@ -218,8 +220,8 @@ void handle_send_message(char *arg, int *maxfd, int c, struct client *clients)
         send_error(c, "no user found.");
 }
 
-void handle_close_socket(int bytes_received, int c, struct client *clients,
-    fd_set *main, int *maxfd, int s)
+void handle_close_socket(const int bytes_received, const int c, const int s,
+    struct client *clients, fd_set *main, int *maxfd)
 {
     if (bytes_received == 0) {
         if (clients[c].state)
@@ -234,17 +236,18 @@ void handle_close_socket(int bytes_received, int c, struct client *clients,
     reset_client(c, clients);
     FD_CLR(c, main);
     if (c == *maxfd)
-        update_maxfd(s, maxfd, main);
+        *maxfd = update_maxfd(s, main);
 }
 
-void reset_client(int c, struct client *clients)
+void reset_client(const int c, struct client *clients)
 {
     clients[c].state = STATE_CONNECTED;
     clients[c].buffer_len = 0;
     clients[c].username[0] = '\0';
 }
 
-int can_add_username(char *arg, int *maxfd, int c, struct client *clients)
+int can_add_username(const char *arg, const int *maxfd, const int c,
+    const struct client *clients)
 {
     if (strlen(arg) >= USERNAME_MAX_LEN) {
         send_error(c, "username is too long.");
@@ -267,7 +270,7 @@ int can_add_username(char *arg, int *maxfd, int c, struct client *clients)
     return 1;
 }
 
-int is_valid_username(char *arg)
+int is_valid_username(const char *arg)
 {
     while (*arg) {
         if (!isalnum((unsigned char)*arg) && *arg != '_') {
@@ -291,7 +294,7 @@ void split_input(char *buffer, char **cmd, char **arg)
     }
 }
 
-int validate_input(int c, char **cmd, char **arg)
+int validate_input(const int c, char **cmd, char **arg)
 {
     *cmd = trim_arg(*cmd);
     *arg = trim_arg(*arg);
@@ -323,7 +326,7 @@ char *trim_arg(char *s)
     return s;
 }
 
-void handle_new_socket(int s, fd_set *main, int *maxfd)
+void handle_new_socket(const int s, int *maxfd, fd_set *main)
 {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
@@ -332,15 +335,15 @@ void handle_new_socket(int s, fd_set *main, int *maxfd)
     }
 
     FD_SET(client_socket, main);
-    if (client_socket > *maxfd)
-        *maxfd = client_socket; 
     printf("Connected to client on socket %d...\n", client_socket);
+    if (client_socket > *maxfd)
+        *maxfd = client_socket;
 }
 
-void setup_server(int *server)
+int setup_server(void)
 {
-    *server = socket(PF_INET, SOCK_STREAM, 0);
-    if (*server == -1) {
+    int server_fd = socket(PF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
         printf("Error: Cannot create socket.\n");
         exit(EXIT_FAILURE);
     }
@@ -352,23 +355,25 @@ void setup_server(int *server)
     address.sin_port = htons(PORT);
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(*server, (struct sockaddr *) &address, sizeof(address)) == -1) {
+    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
         printf("Error: Cannot bind socket to address.\n");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(*server, 4) == -1) {
+    if (listen(server_fd, 4) == -1) {
         printf("Error: Cannot start listening.\n");
         exit(EXIT_FAILURE);
     }
+
+    return server_fd;
 }
 
-void update_maxfd(int s, int *maxfd, fd_set *main)
+int update_maxfd(const int s, const fd_set *main)
 {
     int new_maxfd = s;
     for (int i = 0; i < FD_SETSIZE; i++) {
         if (FD_ISSET(i, main) && i > new_maxfd)
             new_maxfd = i;
     }
-    *maxfd = new_maxfd;
+    return new_maxfd;
 }
