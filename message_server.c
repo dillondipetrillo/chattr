@@ -29,10 +29,15 @@ enum client_cmd {
 
 enum error_res {
     ERR_NONE = 0, // No error
+    ERR_ALREADY_AUTHENTICATED,
     ERR_BUFFER_OVERFLOW,
+    ERR_INVALID_USERNAME,
     ERR_LINE_TOO_LONG,
-    ERR_NO_COMMAND,
-    ERR_NO_ARGUMENT
+    ERR_MISSING_ARGUMENT,
+    ERR_MISSING_COMMAND,
+    ERR_UNKNOWN_COMMAND,
+    ERR_USERNAME_TAKEN,
+    ERR_USERNAME_TOO_LONG
 };
 
 struct client {
@@ -45,6 +50,8 @@ struct client {
 // Function prototypes
 enum error_res can_add_username(const char *arg, const int *maxfd, const int c,
     const struct client *clients);
+enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
+    struct client *clients);
 void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client *clients);
 void handle_close_socket(const int c, const int s, struct client *clients,
@@ -182,42 +189,60 @@ void process_input(const int c, const int *maxfd, char *read_line,
     struct client *clients)
 {
     char *cmd_str, *arg_str;
-    enum error_res err = validate_input(c, read_line, &cmd_str, &arg_str);
-    if (err != ERR_NONE) {
-        send_error_code(c, CMD_UNKNOWN, err);
+    enum error_res err_input = validate_input(c, read_line, &cmd_str,
+        &arg_str);
+    if (err_input != ERR_NONE) {
+        send_error_code(c, CMD_UNKNOWN, err_input);
         return;
     }
 
     enum client_cmd cmd = parse_command(cmd_str);
+    enum error_res err_cmd;
 
     switch(cmd) {
         case CMD_AUTH:
-            enum error_res user_err = can_add_username(arg_str, maxfd, c,
-                clients);
-            if (user_err != ERR_NONE) {
-                send_error_code(c, CMD_AUTH, user_err);
+            err_cmd = handle_auth(arg_str, maxfd, c, clients);
+            if (err_cmd != ERR_NONE) {
+                send_error_code(c, CMD_AUTH, err_cmd);
                 return;
             }
-            handle_auth(c, arg_str, clients);
-            send_ok(c, CMD_AUTH);
+            // send_ok(c, CMD_AUTH);
             break;
-    }
 
-    // Valid command and argument, handle command
-    if (strcmp(cmd, AUTH) == 0) {
-        if (can_add_username(arg_str, maxfd, c, clients)) {
-            clients[c].state = STATE_AUTHENTICATED;
-            strncpy(clients[c].username, arg_str, USERNAME_MAX_LEN - 1);
-            clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
-            printf("OK: %s is authenticated.\n", clients[c].username);
-        }
-    } else if (strcmp(cmd, SEND) == 0) {
-        if (clients[c].state)
-            handle_send_message(arg_str, maxfd, c, clients);
-        else
-            send_error(c, "Need to authenticate to send message.");
-    } else
-        send_error(c, "Error: command not recognized.");
+        case CMD_SEND:
+            err_cmd = handle_send();
+            if (err_cmd != ERR_NONE) {
+                send_error_code(c, CMD_SEND, err_cmd);
+                return;
+            }
+            /*
+                if (clients[c].state)
+                    handle_send_message(arg_str, maxfd, c, clients);
+                else
+                    send_error(c, "Need to authenticate to send message.");
+            */
+            // send_ok(c, CMD_SEND);
+            break;
+
+        default:
+            send_error_code(c, CMD_UNKNOWN, ERR_UNKNOWN_COMMAND);
+    }
+}
+
+enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
+    struct client *clients)
+{
+    enum error_res is_valid_username = can_add_username(arg, maxfd, c,
+        clients);
+    if (is_valid_username != ERR_NONE)
+        return is_valid_username;
+
+    // Is a valid username, add user
+    clients[c].state = STATE_AUTHENTICATED;
+    strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
+    clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
+    printf("OK: %s is authenticated.\n", clients[c].username);
+    return ERR_NONE;
 }
 
 void send_error(int c, char *err_msg)
@@ -319,25 +344,14 @@ void reset_client(const int c, struct client *clients)
 enum error_res can_add_username(const char *arg, const int *maxfd, const int c,
     const struct client *clients)
 {
-    if (strlen(arg) >= USERNAME_MAX_LEN) {
-        send_error(c, "username is too long.");
-        return 0;
-    }
-    if (!is_valid_username(arg)) {
-        send_error(c, "not a valid username format.");
-        return 0;
-    }
-    if (clients[c].state) {
-        send_error(c, "client already has a username.");
-        return 0;
-    }
+    if (strlen(arg) >= USERNAME_MAX_LEN) return ERR_USERNAME_TOO_LONG;
+    if (!is_valid_username(arg)) return ERR_INVALID_USERNAME;
+    if (clients[c].state) return ERR_ALREADY_AUTHENTICATED;
     for (int i = 0; i <= *maxfd; i++) {
-        if (strcmp(arg, clients[i].username) == 0) {
-            send_error(c, "username is already taken.");
-            return 0;
-        }
+        if (strcmp(arg, clients[i].username) == 0)
+            return ERR_USERNAME_TAKEN;
     }
-    return 1;
+    return ERR_NONE;
 }
 
 int is_valid_username(const char *arg)
@@ -371,12 +385,12 @@ enum error_res validate_input(const int c, char *read_line, char **cmd,
     *cmd = trim_arg(*cmd);
     *arg = trim_arg(*arg);
     if (*cmd == NULL || **cmd == '\0') {
-        return ERR_NO_COMMAND;
+        return ERR_MISSING_COMMAND;
     }
     if (*arg == NULL || **arg == '\0') {
-        return ERR_NO_ARGUMENT;
+        return ERR_MISSING_ARGUMENT;
     }
-    ERR_NONE;
+    return ERR_NONE;
 }
 
 char *trim_arg(char *s)
@@ -414,7 +428,7 @@ int setup_server(void)
 {
     int server_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        printf("Error: Cannot create socket.\n");
+        perror("socket");
         exit(EXIT_FAILURE);
     }
 
@@ -426,12 +440,12 @@ int setup_server(void)
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
-        printf("Error: Cannot bind socket to address.\n");
+        perror("bind");
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, 4) == -1) {
-        printf("Error: Cannot start listening.\n");
+        perror("listen");
         exit(EXIT_FAILURE);
     }
 
