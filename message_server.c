@@ -7,13 +7,22 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define AUTH "AUTH"         // Command to authenticate users
-#define ERROR "ERROR"       // Macro for sending error messages
-#define MAX_LINE_SIZE 1024  // Maximum length for client buffer
-#define MAX_BUFF_SIZE 4096  // Maximum buffer size
-#define PORT 8080           // Default port for socket
-#define SEND "SEND"         // Command to send a message
-#define USERNAME_MAX_LEN 32 // Max length for usernames
+#define AUTH "AUTH"
+#define ALREADY_AUTHENTICATED "ALREADY_AUTHENTICATED"
+#define BUFFER_OVERFLOW "BUFFER_OVERFLOW"
+#define ERROR "ERROR"
+#define INVALID_USERNAME "INVALID_USERNAME"
+#define LINE_TOO_LONG "LINE_TOO_LONG"
+#define MAX_LINE_SIZE 1024
+#define MAX_BUFF_SIZE 4096
+#define MISSING_ARGUMENT "MISSING_ARGUMENT"
+#define MISSING_CMD "MISSING_COMMAND"
+#define PORT 8080
+#define SEND "SEND"
+#define UNKNOWN_CMD "UNKNOWN_COMMAND"
+#define USERNAME_TAKEN "USERNAME_TAKEN"
+#define USERNAME_TOO_LONG "USERNAME_TOO_LONG"
+#define USERNAME_MAX_LEN 32
 
 // Enum that determines a client sockets authenticated state.
 enum client_state {
@@ -50,6 +59,7 @@ struct client {
 // Function prototypes
 enum error_res can_add_username(const char *arg, const int *maxfd, const int c,
     const struct client *clients);
+char *command_to_str(const enum client_cmd cmd);
 enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
     struct client *clients);
 void handle_client(const int c, const int s, int *maxfd, fd_set *main,
@@ -61,7 +71,7 @@ void handle_send_message(char *arg, const int *maxfd, const int c,
     const struct client *clients);
 void initialize_clients(struct client *c);
 int  is_valid_username(const char *arg);
-enum client_cmd parse_command(char *cmd_str);
+enum client_cmd parse_command(const char *cmd_str);
 void process_input(const int c, const int *maxfd, char *read_line,
     struct client *clients);
 void reset_client(const int c, struct client *clients);
@@ -178,7 +188,7 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     }
 }
 
-enum client_cmd parse_command(char *cmd_str)
+enum client_cmd parse_command(const char *cmd_str)
 {
     if (strcmp(cmd_str, AUTH) == 0) return CMD_AUTH;
     if (strcmp(cmd_str, SEND) == 0) return CMD_SEND;
@@ -241,24 +251,7 @@ enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
     clients[c].state = STATE_AUTHENTICATED;
     strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
     clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
-    printf("OK: %s is authenticated.\n", clients[c].username);
     return ERR_NONE;
-}
-
-void send_error(int c, char *err_msg)
-{
-    char buffer[MAX_LINE_SIZE];
-    char *ptr = buffer;
-    snprintf(buffer, sizeof(buffer), "ERROR: %s\n", err_msg);
-    int err_msg_len = strlen(buffer);
-    ssize_t err_bytes_sent;
-    while (err_msg_len > 0) {
-        err_bytes_sent = send(c, ptr, err_msg_len, 0);
-        if (err_bytes_sent < 0)
-            printf("Error sending error message.\n");
-        ptr += err_bytes_sent;
-        err_msg_len -= err_bytes_sent;
-    }
 }
 
 int send_all(const int c, const char *buffer, const size_t length)
@@ -273,6 +266,30 @@ int send_all(const int c, const char *buffer, const size_t length)
         total_sent += bytes_sent;
     }
     return 0; // success
+}
+
+char *command_to_str(const enum client_cmd cmd)
+{
+    switch(cmd) {
+        case CMD_AUTH: return AUTH;
+        case CMD_SEND: return SEND;
+        default: return UNKNOWN_CMD;
+    }
+}
+
+char *error_to_str(const enum error_res err)
+{
+    switch(err) {
+        case ERR_ALREADY_AUTHENTICATED: return ALREADY_AUTHENTICATED;
+        case ERR_BUFFER_OVERFLOW: return BUFFER_OVERFLOW;
+        case ERR_INVALID_USERNAME: return INVALID_USERNAME;
+        case ERR_LINE_TOO_LONG: return LINE_TOO_LONG;
+        case ERR_MISSING_ARGUMENT: return MISSING_ARGUMENT;
+        case ERR_MISSING_COMMAND: return MISSING_CMD;
+        case ERR_UNKNOWN_COMMAND: return UNKNOWN_CMD;
+        case ERR_USERNAME_TAKEN: return USERNAME_TAKEN;
+        case ERR_USERNAME_TOO_LONG: return USERNAME_TOO_LONG;
+    }
 }
 
 void send_error_code(const int c, const enum client_cmd cmd,
@@ -344,9 +361,9 @@ void reset_client(const int c, struct client *clients)
 enum error_res can_add_username(const char *arg, const int *maxfd, const int c,
     const struct client *clients)
 {
-    if (strlen(arg) >= USERNAME_MAX_LEN) return ERR_USERNAME_TOO_LONG;
-    if (!is_valid_username(arg)) return ERR_INVALID_USERNAME;
     if (clients[c].state) return ERR_ALREADY_AUTHENTICATED;
+    if (!is_valid_username(arg)) return ERR_INVALID_USERNAME;
+    if (strlen(arg) >= USERNAME_MAX_LEN) return ERR_USERNAME_TOO_LONG;
     for (int i = 0; i <= *maxfd; i++) {
         if (strcmp(arg, clients[i].username) == 0)
             return ERR_USERNAME_TAKEN;
@@ -357,7 +374,7 @@ enum error_res can_add_username(const char *arg, const int *maxfd, const int c,
 int is_valid_username(const char *arg)
 {
     while (*arg) {
-        if (!isalnum((unsigned char)*arg) && *arg != '_') {
+        if (!isalnum((unsigned char)*arg) || *arg != '_') {
             return 0;
         }
         arg++;
@@ -439,7 +456,9 @@ int setup_server(void)
     address.sin_port = htons(PORT);
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
+    if (bind(server_fd, (struct sockaddr *) &address,
+        sizeof(address)) == -1)
+    {
         perror("bind");
         exit(EXIT_FAILURE);
     }
