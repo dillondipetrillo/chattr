@@ -7,59 +7,80 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define AUTH "AUTH"
-#define ALREADY_AUTHENTICATED "ALREADY_AUTHENTICATED"
-#define BUFFER_OVERFLOW "BUFFER_OVERFLOW"
-#define ERROR "ERROR"
-#define ERROR_NONE "ERROR_NONE"
-#define INVALID_USERNAME "INVALID_USERNAME"
-#define LINE_TOO_LONG "LINE_TOO_LONG"
-#define MALFORMED_REQUEST "MALFORMED_REQUEST"
+// Macros for program structure
 #define MAX_LINE_SIZE 1024
 #define MAX_BUFF_SIZE 4096
-#define MISSING_ARGUMENT "MISSING_ARGUMENT"
-#define MISSING_CMD "MISSING_COMMAND"
-#define MSG "MSG"
-#define NOT_AUTHENTICATED "NOT_AUTHENTICATED"
-#define OK "OK"
 #define PORT 8080
-#define SEND "SEND"
-#define SEND_FAILED "SEND_FAILED"
-#define SEND_TO_SELF "SEND_TO_SELF"
-#define UNKNOWN_CMD "UNKNOWN_COMMAND"
-#define USER_NOT_FOUND "USER_NOT_FOUND"
-#define USERNAME_TAKEN "USERNAME_TAKEN"
-#define USERNAME_TOO_LONG "USERNAME_TOO_LONG"
 #define USERNAME_MAX_LEN 32
+
+// Macros for ok/error response commands and error codes
+#define AUTH "AUTH"
+#define ALREADY_AUTHENTICATED "ALREADY_AUTHENTICATED"
+#define ALREADY_EXISTS "ALREADY_EXISTS"
+#define ERROR "ERROR"
+#define ERROR_NONE "ERROR_NONE"
+#define INPUT_TOO_LARGE "INPUT_TOO_LARGE"
+#define INVALID_ARGUMENT "INVALID_ARGUMENT"
+#define INVALID_COMMAND "INVALID_COMMAND"
+#define MISSING_ARGUMENT "MISSING_ARGUMENT"
+#define MSG_USER "MSG_USER"
+#define NOT_AUTHENTICATED "NOT_AUTHENTICATED"
+#define NOT_FOUND "NOT_FOUND"
+#define OK "OK"
+#define SEND_USER "SEND_USER"
+
+// Macros for ok/error response detailed description
+#define already_authenticated "already_authenticated"
+#define authentication_required "authentication_required"
+#define exceeds_max_length "exceeds_max_length"
+#define input_too_large "input_too_large"
+#define invalid_format "invalid_format"
+#define message_required "message_required"
+#define success "success"
+#define unknown_command "unknown_command"
+#define username_required "username_required"
+#define username_taken "username_taken"
+#define user_not_found "user_not_found"
 
 // Enum that determines a client sockets authenticated state.
 enum client_state {
-    STATE_CONNECTED,
-    STATE_AUTHENTICATED
+    STATE_AUTHENTICATED,
+    STATE_CONNECTED
 };
 
+// Commands for clients to use
 enum client_cmd {
     CMD_AUTH,
-    CMD_SEND,
-    CMD_UNKNOWN
+    CMD_SEND_USER,
+    CMD_UNKNOWN // Used for specific error reponses
 };
 
+// Error codes
 enum error_res {
     ERR_NONE = 0, // No error
     ERR_ALREADY_AUTHENTICATED,
-    ERR_BUFFER_OVERFLOW,
-    ERR_INVALID_USERNAME,
-    ERR_LINE_TOO_LONG,
-    ERR_MALFORMED_REQUEST,
+    ERR_ALREADY_EXISTS,
+    ERR_INPUT_TOO_LARGE,
+    ERR_INVALID_ARGUMENT,
+    ERR_INVALID_COMMAND,
     ERR_MISSING_ARGUMENT,
-    ERR_MISSING_COMMAND,
     ERR_NOT_AUTHENTICATED,
-    ERR_SEND_FAILED,
-    ERR_SEND_TO_SELF,
-    ERR_UNKNOWN_COMMAND,
-    ERR_USER_NOT_FOUND,
-    ERR_USERNAME_TAKEN,
-    ERR_USERNAME_TOO_LONG
+    ERR_NOT_FOUND
+};
+
+// Deatiled description for server response
+enum detail_res {
+    detail_already_authenticated,
+    detail_authentication_required,
+    detail_exceeds_max_length,
+    detail_input_too_large,
+    detail_invalid_format,
+    detail_message_required,
+    detail_success,
+    detail_unknown_command,
+    detail_username_required,
+    detail_username_taken,
+    detail_user_not_found
 };
 
 struct client {
