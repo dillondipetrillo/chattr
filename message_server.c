@@ -13,34 +13,41 @@
 #define PORT 8080
 #define USERNAME_MAX_LEN 32
 
-// Macros for ok/error response commands and error codes
+// Macros for ok/error response commands
 #define AUTH "AUTH"
-#define ALREADY_AUTHENTICATED "ALREADY_AUTHENTICATED"
-#define ALREADY_EXISTS "ALREADY_EXISTS"
 #define ERROR "ERROR"
-#define ERROR_NONE "ERROR_NONE"
-#define INPUT_TOO_LARGE "INPUT_TOO_LARGE"
-#define INVALID_ARGUMENT "INVALID_ARGUMENT"
-#define INVALID_COMMAND "INVALID_COMMAND"
-#define MISSING_ARGUMENT "MISSING_ARGUMENT"
 #define MSG_USER "MSG_USER"
-#define NOT_AUTHENTICATED "NOT_AUTHENTICATED"
-#define NOT_FOUND "NOT_FOUND"
 #define OK "OK"
 #define SEND_USER "SEND_USER"
 
+// Macros for error codes
+#define ALREADY_AUTHENTICATED_ERR_CODE "ALREADY_AUTHENTICATED"
+#define ALREADY_EXISTS_ERR_CODE "ALREADY_EXISTS"
+#define ERROR_NONE_ERR_CODE "ERROR_NONE"
+#define INPUT_TOO_LARGE_ERR_CODE "INPUT_TOO_LARGE"
+#define INVALID_ARGUMENT_ERR_CODE "INVALID_ARGUMENT"
+#define INVALID_COMMAND_ERR_CODE "INVALID_COMMAND"
+#define MISSING_ARGUMENT_ERR_CODE "MISSING_ARGUMENT"
+#define NOT_AUTHENTICATED_ERR_CODE "NOT_AUTHENTICATED"
+#define NOT_FOUND_ERR_CODE "NOT_FOUND"
+
 // Macros for ok/error response detailed description
-#define already_authenticated "already_authenticated"
-#define authentication_required "authentication_required"
-#define exceeds_max_length "exceeds_max_length"
-#define input_too_large "input_too_large"
-#define invalid_format "invalid_format"
-#define message_required "message_required"
-#define success "success"
-#define unknown_command "unknown_command"
-#define username_required "username_required"
-#define username_taken "username_taken"
-#define user_not_found "user_not_found"
+#define ALREADY_AUTHENTICATED_DETAIL "already_authenticated"
+#define AUTHENTICATION_REQUIRED_DETAIL "authentication_required"
+#define EXCEEDS_MAX_LEN_DETAIL "exceeds_max_length"
+#define INPUT_TOO_LARGE_DETAIL "input_too_large"
+#define INVALID_FORMAT_DETAIL "invalid_format"
+#define MESSAGE_REQUIRED_DETAIL "message_required"
+#define MESSAGE_TOO_LONG_DETAIL "message_too_long"
+#define NONE_DETAIL "none"
+#define SUCCESS_DETAIL "success"
+#define UNKNOWN_COMMAND_DETAIL "unknown_command"
+#define USERNAME_REQUIRED_DETAIL "username_required"
+#define USERNAME_TAKEN_DETAIL "username_taken"
+#define USER_NOT_FOUND_DETAIL "user_not_found"
+
+#define RESULT_ERR(code, detail) (struct error){code, detail}
+#define ERR_OK (struct error){ERR_NONE, detail_none}
 
 // Enum that determines a client sockets authenticated state.
 enum client_state {
@@ -76,11 +83,18 @@ enum detail_res {
     detail_input_too_large,
     detail_invalid_format,
     detail_message_required,
+    detail_message_too_long,
+    detail_none,
     detail_success,
     detail_unknown_command,
     detail_username_required,
     detail_username_taken,
     detail_user_not_found
+};
+
+struct error {
+    enum error_res code;
+    enum detail_res detail;
 };
 
 struct client {
@@ -111,8 +125,8 @@ void process_input(const int c, const int *maxfd, char *read_line,
     struct client *clients);
 void reset_client(const int c, struct client *clients);
 ssize_t send_all(const int c, const char *buffer, const size_t length);
-void send_error_code(const int c, const enum client_cmd cmd,
-    const enum error_res err);
+void send_error(const int c, const enum client_cmd cmd,
+    const struct error err);
 void send_ok(const int c, const enum client_cmd cmd);
 int setup_server(void);
 void split_input(char *buffer, char **cmd, char **arg);
@@ -190,7 +204,8 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 
     // Too many characters entered to fit into client buffer
     if (clients[c].buffer_len + bytes_received > MAX_BUFF_SIZE) {
-        send_error_code(c, CMD_UNKNOWN, ERR_BUFFER_OVERFLOW);
+        send_error(c, CMD_UNKNOWN, RESULT_ERR(ERR_INPUT_TOO_LARGE,
+            detail_input_too_large));
         handle_close_socket(c, s, clients, main, maxfd);
         return;
     }
@@ -205,7 +220,8 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     for (int i = 0; i < clients[c].buffer_len; i++) {
         if (buf[i] == '\n') {
             if (i >= MAX_LINE_SIZE) {
-                send_error_code(c, CMD_UNKNOWN, ERR_LINE_TOO_LONG);
+                send_error(c, CMD_UNKNOWN, RESULT_ERR(ERR_INPUT_TOO_LARGE,
+                    detail_message_too_long));
                 handle_close_socket(c, s, clients, main, maxfd);
                 return;
             }
@@ -227,7 +243,7 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 enum client_cmd parse_command(const char *cmd_str)
 {
     if (strcmp(cmd_str, AUTH) == 0) return CMD_AUTH;
-    if (strcmp(cmd_str, SEND) == 0) return CMD_SEND;
+    if (strcmp(cmd_str, SEND_USER) == 0) return CMD_SEND_USER;
     return CMD_UNKNOWN;
 }
 
@@ -237,7 +253,7 @@ void process_input(const int c, const int *maxfd, char *read_line,
     char *cmd_str, *arg_str;
     enum error_res err_input = validate_input(read_line, &cmd_str, &arg_str);
     if (err_input != ERR_NONE) {
-        send_error_code(c, CMD_UNKNOWN, err_input);
+        send_error(c, CMD_UNKNOWN, err_input);
         return;
     }
 
@@ -248,7 +264,7 @@ void process_input(const int c, const int *maxfd, char *read_line,
         case CMD_AUTH:
             err_cmd = handle_auth(arg_str, maxfd, c, clients);
             if (err_cmd != ERR_NONE) {
-                send_error_code(c, CMD_AUTH, err_cmd);
+                send_error(c, CMD_AUTH, err_cmd);
                 return;
             }
             send_ok(c, CMD_AUTH);
@@ -256,20 +272,20 @@ void process_input(const int c, const int *maxfd, char *read_line,
 
         case CMD_SEND:
             if (clients[c].state != STATE_AUTHENTICATED) {
-                send_error_code(c, CMD_SEND, ERR_NOT_AUTHENTICATED);
+                send_error(c, CMD_SEND, ERR_NOT_AUTHENTICATED);
                 return;
             }
 
             err_cmd = handle_send(arg_str, maxfd, c, clients);
             if (err_cmd != ERR_NONE) {
-                send_error_code(c, CMD_SEND, err_cmd);
+                send_error(c, CMD_SEND, err_cmd);
                 return;
             }
             send_ok(c, CMD_SEND);
             break;
 
         default:
-            send_error_code(c, CMD_UNKNOWN, ERR_MALFORMED_REQUEST);
+            send_error(c, CMD_UNKNOWN, ERR_MALFORMED_REQUEST);
             break;
     }
 }
@@ -323,30 +339,46 @@ void send_ok(const int c, const enum client_cmd cmd)
 char *error_to_str(const enum error_res err)
 {
     switch(err) {
-        case ERR_ALREADY_AUTHENTICATED: return ALREADY_AUTHENTICATED;
-        case ERR_BUFFER_OVERFLOW: return BUFFER_OVERFLOW;
-        case ERR_INVALID_USERNAME: return INVALID_USERNAME;
-        case ERR_LINE_TOO_LONG: return LINE_TOO_LONG;
-        case ERR_MALFORMED_REQUEST: return MALFORMED_REQUEST;
-        case ERR_MISSING_ARGUMENT: return MISSING_ARGUMENT;
-        case ERR_MISSING_COMMAND: return MISSING_CMD;
-        case ERR_NOT_AUTHENTICATED: return NOT_AUTHENTICATED;
-        case ERR_SEND_FAILED: return SEND_FAILED;
-        case ERR_SEND_TO_SELF: return SEND_TO_SELF;
-        case ERR_UNKNOWN_COMMAND: return UNKNOWN_CMD;
-        case ERR_USER_NOT_FOUND: return USER_NOT_FOUND;
-        case ERR_USERNAME_TAKEN: return USERNAME_TAKEN;
-        case ERR_USERNAME_TOO_LONG: return USERNAME_TOO_LONG;
-        default: return ERROR_NONE;
+        case ERR_ALREADY_AUTHENTICATED:
+            return ALREADY_AUTHENTICATED_ERR_CODE;
+        case ERR_ALREADY_EXISTS: return ALREADY_EXISTS_ERR_CODE;
+        case ERR_INPUT_TOO_LARGE: return INPUT_TOO_LARGE_ERR_CODE;
+        case ERR_INVALID_ARGUMENT: return INVALID_ARGUMENT_ERR_CODE;
+        case ERR_INVALID_COMMAND: return INVALID_COMMAND_ERR_CODE;
+        case ERR_MISSING_ARGUMENT: return MISSING_ARGUMENT_ERR_CODE;
+        case ERR_NOT_AUTHENTICATED: return NOT_AUTHENTICATED_ERR_CODE;
+        case ERR_NOT_FOUND: return NOT_FOUND_ERR_CODE;
+        default: return ERROR_NONE_ERR_CODE;
     }
 }
 
-void send_error_code(const int c, const enum client_cmd cmd,
-    const enum error_res err)
+char *detail_to_str(const enum detail_res detail)
+{
+    switch(detail) {
+        case detail_already_authenticated:
+            return ALREADY_AUTHENTICATED_DETAIL;
+        case detail_authentication_required:
+            return AUTHENTICATION_REQUIRED_DETAIL;
+        case detail_exceeds_max_length: return EXCEEDS_MAX_LEN_DETAIL;
+        case detail_input_too_large: return INPUT_TOO_LARGE_DETAIL;
+        case detail_invalid_format: return INVALID_FORMAT_DETAIL;
+        case detail_message_required: return MESSAGE_REQUIRED_DETAIL;
+        case detail_success: return SUCCESS_DETAIL;
+        case detail_unknown_command: return UNKNOWN_COMMAND_DETAIL;
+        case detail_username_required: return USERNAME_REQUIRED_DETAIL;
+        case detail_username_taken: return USERNAME_TAKEN_DETAIL;
+        case detail_user_not_found: return USER_NOT_FOUND_DETAIL;
+        default : return NONE_DETAIL;
+    }
+}
+
+void send_error(const int c, const enum client_cmd cmd,
+    const struct error err)
 {
     char buffer[MAX_LINE_SIZE];
-    snprintf(buffer, sizeof(buffer), "%s %s %s\n", ERROR, command_to_str(cmd),
-        error_to_str(err));
+    snprintf(buffer, sizeof(buffer), "%s %s %s %s\n", ERROR,
+        command_to_str(cmd), error_to_str(err.code),
+        detail_to_str(err.detail));
     send_all(c, buffer, strlen(buffer));
 }
 
@@ -357,10 +389,6 @@ enum error_res handle_send(char *arg, const int *maxfd, const int c,
     enum error_res err_arg = validate_input(arg, &receiver, &message);
     if (err_arg != ERR_NONE)
         return err_arg;
-    
-    // Refuse sending message to self
-    if (strcmp(clients[c].username, receiver) == 0)
-        return ERR_SEND_TO_SELF;
 
     char full_message[MAX_BUFF_SIZE];
     snprintf(full_message, sizeof(full_message), "%s %s %s\n",
