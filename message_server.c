@@ -19,32 +19,7 @@
 #define MSG_USER "MSG_USER"
 #define OK "OK"
 #define SEND_USER "SEND_USER"
-
-// Macros for error codes
-#define ALREADY_AUTHENTICATED_ERR_CODE "ALREADY_AUTHENTICATED"
-#define ALREADY_EXISTS_ERR_CODE "ALREADY_EXISTS"
-#define ERROR_NONE_ERR_CODE "ERROR_NONE"
-#define INPUT_TOO_LARGE_ERR_CODE "INPUT_TOO_LARGE"
-#define INVALID_ARGUMENT_ERR_CODE "INVALID_ARGUMENT"
-#define INVALID_COMMAND_ERR_CODE "INVALID_COMMAND"
-#define MISSING_ARGUMENT_ERR_CODE "MISSING_ARGUMENT"
-#define NOT_AUTHENTICATED_ERR_CODE "NOT_AUTHENTICATED"
-#define NOT_FOUND_ERR_CODE "NOT_FOUND"
-
-// Macros for ok/error response detailed description
-#define ALREADY_AUTHENTICATED_DETAIL "already_authenticated"
-#define AUTHENTICATION_REQUIRED_DETAIL "authentication_required"
-#define EXCEEDS_MAX_LEN_DETAIL "exceeds_max_length"
-#define INPUT_TOO_LARGE_DETAIL "input_too_large"
-#define INVALID_FORMAT_DETAIL "invalid_format"
-#define MESSAGE_REQUIRED_DETAIL "message_required"
-#define MESSAGE_TOO_LONG_DETAIL "message_too_long"
-#define NONE_DETAIL "none"
-#define SUCCESS_DETAIL "success"
-#define UNKNOWN_COMMAND_DETAIL "unknown_command"
-#define USERNAME_REQUIRED_DETAIL "username_required"
-#define USERNAME_TAKEN_DETAIL "username_taken"
-#define USER_NOT_FOUND_DETAIL "user_not_found"
+#define UNKNOWN_CMD "UNKNOWN"
 
 #define RESULT_ERR(code, detail) (struct error){code, detail}
 #define ERR_OK (struct error){ERR_NONE, detail_none}
@@ -82,6 +57,7 @@ enum detail_res {
     detail_exceeds_max_length,
     detail_input_too_large,
     detail_invalid_format,
+    detail_line_too_long,
     detail_message_required,
     detail_message_too_long,
     detail_none,
@@ -104,19 +80,46 @@ struct client {
     char username[USERNAME_MAX_LEN];
 };
 
+char *err_code_lookup[] = {
+    "ERROR_NONE",
+    "ALREADY_AUTHENTICATED",
+    "ALREADY_EXISTS",
+    "INPUT_TOO_LARGE",
+    "INVALID_ARGUMENT",
+    "INVALID_COMMAND",
+    "MISSING_ARGUMENT",
+    "NOT_AUTHENTICATED",
+    "NOT_FOUND"
+};
+
+char *detail_lookup[] = {
+    "already_authenticated",
+    "authentication_required",
+    "exceeds_max_length",
+    "input_too_large",
+    "invalid_format",
+    "line_too_long",
+    "message_required",
+    "message_too_long",
+    "none",
+    "success",
+    "unknown_command",
+    "username_required",
+    "username_taken",
+    "user_not_found"
+};
+
 // Function prototypes
-enum error_res can_add_username(const char *arg, const int *maxfd,
+struct error can_add_username(const char *arg, const int *maxfd,
     const int c, const struct client *clients);
-char *command_to_str(const enum client_cmd cmd);
-char *error_to_str(const enum error_res err);
-enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
+struct error handle_auth(const char *arg, const int *maxfd, const int c,
     struct client *clients);
 void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client *clients);
 void handle_close_socket(const int c, const int s, struct client *clients,
     fd_set *main, int *maxfd);
 void handle_new_socket(const int s, int *maxfd, fd_set *main);
-enum error_res handle_send(char *arg, const int *maxfd, const int c,
+struct error handle_send(char *arg, const int *maxfd, const int c,
     const struct client *clients);
 void initialize_clients(struct client *c);
 int  is_valid_username(const char *arg);
@@ -132,7 +135,7 @@ int setup_server(void);
 void split_input(char *buffer, char **cmd, char **arg);
 char *trim_arg(char *s);
 int update_maxfd(const int s, const fd_set *main);
-enum error_res  validate_input(char *read_line, char **cmd,
+struct error  validate_input(char *read_line, char **cmd,
     char **arg);
 
 int main(void)
@@ -221,7 +224,7 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
         if (buf[i] == '\n') {
             if (i >= MAX_LINE_SIZE) {
                 send_error(c, CMD_UNKNOWN, RESULT_ERR(ERR_INPUT_TOO_LARGE,
-                    detail_message_too_long));
+                    detail_line_too_long));
                 handle_close_socket(c, s, clients, main, maxfd);
                 return;
             }
@@ -251,58 +254,60 @@ void process_input(const int c, const int *maxfd, char *read_line,
     struct client *clients)
 {
     char *cmd_str, *arg_str;
-    enum error_res err_input = validate_input(read_line, &cmd_str, &arg_str);
-    if (err_input != ERR_NONE) {
+    struct error err_input = validate_input(read_line, &cmd_str, &arg_str);
+    if (err_input.code != ERR_NONE) {
         send_error(c, CMD_UNKNOWN, err_input);
         return;
     }
 
     enum client_cmd cmd = parse_command(cmd_str);
-    enum error_res err_cmd;
+    struct error err_cmd;
 
     switch(cmd) {
         case CMD_AUTH:
             err_cmd = handle_auth(arg_str, maxfd, c, clients);
-            if (err_cmd != ERR_NONE) {
+            if (err_cmd.code != ERR_NONE) {
                 send_error(c, CMD_AUTH, err_cmd);
                 return;
             }
             send_ok(c, CMD_AUTH);
             break;
 
-        case CMD_SEND:
+        case CMD_SEND_USER:
             if (clients[c].state != STATE_AUTHENTICATED) {
-                send_error(c, CMD_SEND, ERR_NOT_AUTHENTICATED);
+                send_error(c, CMD_SEND_USER, RESULT_ERR(ERR_NOT_AUTHENTICATED,
+                    detail_authentication_required));
                 return;
             }
 
             err_cmd = handle_send(arg_str, maxfd, c, clients);
-            if (err_cmd != ERR_NONE) {
-                send_error(c, CMD_SEND, err_cmd);
+            if (err_cmd.code != ERR_NONE) {
+                send_error(c, CMD_SEND_USER, err_cmd);
                 return;
             }
-            send_ok(c, CMD_SEND);
+            send_ok(c, CMD_SEND_USER);
             break;
 
         default:
-            send_error(c, CMD_UNKNOWN, ERR_MALFORMED_REQUEST);
+            send_error(c, CMD_UNKNOWN, RESULT_ERR(ERR_INVALID_COMMAND,
+                detail_unknown_command));
             break;
     }
 }
 
-enum error_res handle_auth(const char *arg, const int *maxfd, const int c,
+struct error handle_auth(const char *arg, const int *maxfd, const int c,
     struct client *clients)
 {
-    enum error_res is_valid_username = can_add_username(arg, maxfd, c,
+    struct error is_valid_username = can_add_username(arg, maxfd, c,
         clients);
-    if (is_valid_username != ERR_NONE)
+    if (is_valid_username.code != ERR_NONE)
         return is_valid_username;
 
     // Is a valid username, add user
     clients[c].state = STATE_AUTHENTICATED;
     strncpy(clients[c].username, arg, USERNAME_MAX_LEN - 1);
     clients[c].username[USERNAME_MAX_LEN - 1] = '\0';
-    return ERR_NONE;
+    return ERR_OK;
 }
 
 ssize_t send_all(const int c, const char *buffer, const size_t length)
@@ -324,7 +329,7 @@ char *command_to_str(const enum client_cmd cmd)
 {
     switch(cmd) {
         case CMD_AUTH: return AUTH;
-        case CMD_SEND: return SEND;
+        case CMD_SEND_USER: return SEND_USER;
         default: return UNKNOWN_CMD;
     }
 }
@@ -336,63 +341,27 @@ void send_ok(const int c, const enum client_cmd cmd)
     send_all(c, buffer, strlen(buffer));
 }
 
-char *error_to_str(const enum error_res err)
-{
-    switch(err) {
-        case ERR_ALREADY_AUTHENTICATED:
-            return ALREADY_AUTHENTICATED_ERR_CODE;
-        case ERR_ALREADY_EXISTS: return ALREADY_EXISTS_ERR_CODE;
-        case ERR_INPUT_TOO_LARGE: return INPUT_TOO_LARGE_ERR_CODE;
-        case ERR_INVALID_ARGUMENT: return INVALID_ARGUMENT_ERR_CODE;
-        case ERR_INVALID_COMMAND: return INVALID_COMMAND_ERR_CODE;
-        case ERR_MISSING_ARGUMENT: return MISSING_ARGUMENT_ERR_CODE;
-        case ERR_NOT_AUTHENTICATED: return NOT_AUTHENTICATED_ERR_CODE;
-        case ERR_NOT_FOUND: return NOT_FOUND_ERR_CODE;
-        default: return ERROR_NONE_ERR_CODE;
-    }
-}
-
-char *detail_to_str(const enum detail_res detail)
-{
-    switch(detail) {
-        case detail_already_authenticated:
-            return ALREADY_AUTHENTICATED_DETAIL;
-        case detail_authentication_required:
-            return AUTHENTICATION_REQUIRED_DETAIL;
-        case detail_exceeds_max_length: return EXCEEDS_MAX_LEN_DETAIL;
-        case detail_input_too_large: return INPUT_TOO_LARGE_DETAIL;
-        case detail_invalid_format: return INVALID_FORMAT_DETAIL;
-        case detail_message_required: return MESSAGE_REQUIRED_DETAIL;
-        case detail_success: return SUCCESS_DETAIL;
-        case detail_unknown_command: return UNKNOWN_COMMAND_DETAIL;
-        case detail_username_required: return USERNAME_REQUIRED_DETAIL;
-        case detail_username_taken: return USERNAME_TAKEN_DETAIL;
-        case detail_user_not_found: return USER_NOT_FOUND_DETAIL;
-        default : return NONE_DETAIL;
-    }
-}
-
 void send_error(const int c, const enum client_cmd cmd,
     const struct error err)
 {
     char buffer[MAX_LINE_SIZE];
     snprintf(buffer, sizeof(buffer), "%s %s %s %s\n", ERROR,
-        command_to_str(cmd), error_to_str(err.code),
-        detail_to_str(err.detail));
+        command_to_str(cmd), err_code_lookup[err.code],
+        detail_lookup[err.detail]);
     send_all(c, buffer, strlen(buffer));
 }
 
-enum error_res handle_send(char *arg, const int *maxfd, const int c,
+struct error handle_send(char *arg, const int *maxfd, const int c,
     const struct client *clients)
 {
     char *receiver, *message;
-    enum error_res err_arg = validate_input(arg, &receiver, &message);
-    if (err_arg != ERR_NONE)
+    struct error err_arg = validate_input(arg, &receiver, &message);
+    if (err_arg.code != ERR_NONE)
         return err_arg;
 
     char full_message[MAX_BUFF_SIZE];
     snprintf(full_message, sizeof(full_message), "%s %s %s\n",
-        MSG, clients[c].username, message);
+        MSG_USER, clients[c].username, message);
     char *ptr = full_message;
 
     ssize_t bytes_sent;
@@ -404,16 +373,13 @@ enum error_res handle_send(char *arg, const int *maxfd, const int c,
         {
             found = 1;
             bytes_sent = send_all(i, ptr, message_len);
-            if (bytes_sent < 0) {
-                return ERR_SEND_FAILED;
-            }
             break;
         }
     }
 
     if (!found)
-        return ERR_USER_NOT_FOUND;
-    return ERR_NONE;
+        return RESULT_ERR(ERR_NOT_FOUND, detail_user_not_found);
+    return ERR_OK;
 }
 
 void handle_close_socket(const int c, const int s, struct client *clients,
@@ -433,18 +399,21 @@ void reset_client(const int c, struct client *clients)
     clients[c].username[0] = '\0';
 }
 
-enum error_res can_add_username(const char *arg, const int *maxfd,
+struct error can_add_username(const char *arg, const int *maxfd,
     const int c, const struct client *clients)
 {
     if (clients[c].state == STATE_AUTHENTICATED)
-        return ERR_ALREADY_AUTHENTICATED;
-    if (!is_valid_username(arg)) return ERR_INVALID_USERNAME;
-    if (strlen(arg) >= USERNAME_MAX_LEN) return ERR_USERNAME_TOO_LONG;
+        return RESULT_ERR(ERR_ALREADY_AUTHENTICATED,
+            detail_already_authenticated);
+    if (!is_valid_username(arg))
+        return RESULT_ERR(ERR_INVALID_ARGUMENT, detail_invalid_format);
+    if (strlen(arg) >= USERNAME_MAX_LEN)
+        return RESULT_ERR(ERR_INVALID_ARGUMENT, detail_exceeds_max_length);
     for (int i = 0; i <= *maxfd; i++) {
         if (strcmp(arg, clients[i].username) == 0)
-            return ERR_USERNAME_TAKEN;
+            return RESULT_ERR(ERR_INVALID_ARGUMENT, detail_username_taken);
     }
-    return ERR_NONE;
+    return ERR_OK;
 }
 
 int is_valid_username(const char *arg)
@@ -470,19 +439,25 @@ void split_input(char *buffer, char **cmd, char **arg)
     }
 }
 
-enum error_res validate_input(char *read_line, char **cmd,
-    char **arg)
+struct error validate_input(char *read_line, char **cmd, char **arg)
 {
     split_input(read_line, cmd, arg);
     *cmd = trim_arg(*cmd);
     *arg = trim_arg(*arg);
+
     if (*cmd == NULL || **cmd == '\0') {
-        return ERR_MISSING_COMMAND;
+        return RESULT_ERR(ERR_INVALID_COMMAND, detail_unknown_command);
     }
+
+    enum client_cmd validated_cmd = parse_command(*cmd);
+
     if (*arg == NULL || **arg == '\0') {
-        return ERR_MISSING_ARGUMENT;
+        return RESULT_ERR(ERR_MISSING_ARGUMENT,
+            (validated_cmd == CMD_AUTH || validated_cmd == CMD_SEND_USER) ?
+                detail_username_required : detail_message_required);
     }
-    return ERR_NONE;
+
+    return ERR_OK;
 }
 
 char *trim_arg(char *s)
