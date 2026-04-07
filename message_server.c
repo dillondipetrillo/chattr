@@ -34,7 +34,7 @@ enum client_state {
 enum client_cmd {
     CMD_AUTH,
     CMD_SEND_USER,
-    CMD_UNKNOWN // Used for specific error reponses
+    CMD_UNKNOWN // Used for error responses
 };
 
 // Error codes
@@ -43,6 +43,7 @@ enum error_res {
     ERR_ALREADY_AUTHENTICATED,
     ERR_ALREADY_EXISTS,
     ERR_INPUT_TOO_LARGE,
+    ERR_INTERNAL_SERVER_ERROR,
     ERR_INVALID_ARGUMENT,
     ERR_INVALID_COMMAND,
     ERR_MISSING_ARGUMENT,
@@ -59,6 +60,7 @@ enum detail_res {
     detail_invalid_format,
     detail_line_too_long,
     detail_message_required,
+    detail_message_send_error,
     detail_message_too_long,
     detail_none,
     detail_success,
@@ -85,6 +87,7 @@ char *err_code_lookup[] = {
     "ALREADY_AUTHENTICATED",
     "ALREADY_EXISTS",
     "INPUT_TOO_LARGE",
+    "INTERNAL_SERVER_ERROR",
     "INVALID_ARGUMENT",
     "INVALID_COMMAND",
     "MISSING_ARGUMENT",
@@ -100,6 +103,7 @@ char *detail_lookup[] = {
     "invalid_format",
     "line_too_long",
     "message_required",
+    "message_send_error",
     "message_too_long",
     "none",
     "success",
@@ -135,8 +139,6 @@ int setup_server(void);
 void split_input(char *buffer, char **cmd, char **arg);
 char *trim_arg(char *s);
 int update_maxfd(const int s, const fd_set *main);
-struct error  validate_input(char *read_line, char **cmd,
-    char **arg);
 
 int main(void)
 {
@@ -254,11 +256,9 @@ void process_input(const int c, const int *maxfd, char *read_line,
     struct client *clients)
 {
     char *cmd_str, *arg_str;
-    struct error err_input = validate_input(read_line, &cmd_str, &arg_str);
-    if (err_input.code != ERR_NONE) {
-        send_error(c, CMD_UNKNOWN, err_input);
-        return;
-    }
+    split_input(read_line, &cmd_str, &arg_str);
+    cmd_str = trim_arg(cmd_str);
+    arg_str = trim_arg(arg_str);
 
     enum client_cmd cmd = parse_command(cmd_str);
     struct error err_cmd;
@@ -337,7 +337,8 @@ char *command_to_str(const enum client_cmd cmd)
 void send_ok(const int c, const enum client_cmd cmd)
 {
     char buffer[MAX_LINE_SIZE];
-    snprintf(buffer, sizeof(buffer), "%s %s\n", OK, command_to_str(cmd));
+    snprintf(buffer, sizeof(buffer), "%s %s %s\n", OK, command_to_str(cmd),
+        detail_lookup[detail_success]);
     send_all(c, buffer, strlen(buffer));
 }
 
@@ -354,10 +355,15 @@ void send_error(const int c, const enum client_cmd cmd,
 struct error handle_send(char *arg, const int *maxfd, const int c,
     const struct client *clients)
 {
+    if (arg == NULL || *arg == '\0')
+        return RESULT_ERR(ERR_MISSING_ARGUMENT, detail_username_required);
     char *receiver, *message;
-    struct error err_arg = validate_input(arg, &receiver, &message);
-    if (err_arg.code != ERR_NONE)
-        return err_arg;
+    split_input(arg, &receiver, &message);
+    receiver = trim_arg(receiver);
+    message = trim_arg(message);
+
+    if (message == NULL || *message == '\0')
+        return RESULT_ERR(ERR_MISSING_ARGUMENT, detail_message_required);
 
     char full_message[MAX_BUFF_SIZE];
     snprintf(full_message, sizeof(full_message), "%s %s %s\n",
@@ -373,6 +379,9 @@ struct error handle_send(char *arg, const int *maxfd, const int c,
         {
             found = 1;
             bytes_sent = send_all(i, ptr, message_len);
+            if (bytes_sent == -1)
+                return RESULT_ERR(ERR_INTERNAL_SERVER_ERROR,
+                    detail_message_send_error);
             break;
         }
     }
@@ -405,6 +414,8 @@ struct error can_add_username(const char *arg, const int *maxfd,
     if (clients[c].state == STATE_AUTHENTICATED)
         return RESULT_ERR(ERR_ALREADY_AUTHENTICATED,
             detail_already_authenticated);
+    if (arg == NULL || *arg == '\0')
+        return RESULT_ERR(ERR_MISSING_ARGUMENT, detail_username_required);
     if (!is_valid_username(arg))
         return RESULT_ERR(ERR_INVALID_ARGUMENT, detail_invalid_format);
     if (strlen(arg) >= USERNAME_MAX_LEN)
@@ -437,27 +448,6 @@ void split_input(char *buffer, char **cmd, char **arg)
             break;
         }
     }
-}
-
-struct error validate_input(char *read_line, char **cmd, char **arg)
-{
-    split_input(read_line, cmd, arg);
-    *cmd = trim_arg(*cmd);
-    *arg = trim_arg(*arg);
-
-    if (*cmd == NULL || **cmd == '\0') {
-        return RESULT_ERR(ERR_INVALID_COMMAND, detail_unknown_command);
-    }
-
-    enum client_cmd validated_cmd = parse_command(*cmd);
-
-    if (*arg == NULL || **arg == '\0') {
-        return RESULT_ERR(ERR_MISSING_ARGUMENT,
-            (validated_cmd == CMD_AUTH || validated_cmd == CMD_SEND_USER) ?
-                detail_username_required : detail_message_required);
-    }
-
-    return ERR_OK;
 }
 
 char *trim_arg(char *s)
