@@ -8,7 +8,7 @@ This project focuses on low-level networking, system design, and protocol develo
 *  Multi-client support using `select()`
 *  Per-client state management
 *  Username authentication (`AUTH`)
-*  Real-time messaging between users (`SEND`)
+*  Real-time messaging between users (`SEND_USER`)
 *  Custom input buffering and message framing (`\n`-delimited)
 *  Graceful client disconnect handling
 *  Input validation (usernames, commands, buffer limits)
@@ -52,9 +52,13 @@ Behavior:
     * Invalid characters
     * Already authenticated clients
 
+Response:
+
+```OK AUTH success```
+
 ### 2. Send Message
 
-```SEND <username> <message>\n```
+```SEND_USER <username> <message>\n```
 
 Example:
 
@@ -70,6 +74,10 @@ Behavior:
     * Sending to self
     * Non-existent users
     * Unauthenticated sender
+
+Response:
+
+```OK SEND_USER success```
 
 ## How to Run
 1. Compile
@@ -108,7 +116,7 @@ Then validated and routed:
 
 ```
 if (strcmp(cmd, AUTH) == 0) { ... }
-else if (strcmp(cmd, SEND) == 0) { ... }
+else if (strcmp(cmd, SEND_USER) == 0) { ... }
 ```
 
 ### Message Routing
