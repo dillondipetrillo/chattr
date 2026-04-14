@@ -19,6 +19,7 @@
 
 void handle_client(const int c, struct client_info *clients);
 void handle_new_socket(const int s, int *maxfd, fd_set *main);
+size_t handle_recv(const int c, char *buffer, const size_t size);
 void init_clients(struct client_info *c);
 int setup_server(void);
 
@@ -59,23 +60,15 @@ int main(void)
 void handle_client(const int c, struct client_info *clients)
 {
     char buffer[sizeof(struct packet_header)];
-    size_t total = 0;
+    size_t bytes_read = handle_recv(c, buffer, sizeof(struct packet_header));
 
-    while (total < sizeof(struct packet_header)) {
-        ssize_t n = recv(c, buffer + total,
-            sizeof(struct packet_header) - total, 0);
-        if (n <= 0) {
-            if (n == -1)
-                perror("recv");
-            /* handle disconnect */
-            return;
-        }
-
-        total += n;
+    if (bytes_read <= 0) {
+        // TODO: handle disconnect
+        return;
     }
 
     struct packet_header header;
-    memcpy(&header, buffer, total);
+    memcpy(&header, buffer, bytes_read);
     header.payload_len = ntohl(header.payload_len);
     header.scope_id = ntohl(header.scope_id);
     header.sender_id = ntohl(header.sender_id);
@@ -83,23 +76,62 @@ void handle_client(const int c, struct client_info *clients)
 
     if (header.payload_len > MAX_PAYLOAD) {
         printf("Payload is too large.\n");
-        /* handle disconnect */
+        // TODO: handle disconnect
     }
 
     char payload[MAX_PAYLOAD];
-    size_t payload_total = 0;
+    size_t payload_read = handle_recv(c, payload, sizeof(header.payload_len));
 
-    while (payload_total < sizeof(header.payload_len)) {
-        ssize_t p = recv(c, payload + payload_total,
-            sizeof(header.payload_len) - payload_total, 0);
-        if (p <= 0) {
-            if (p == -1)
-                perror("recv");
-            /* handle disconnect */
-            return;
+    if (payload_read <= 0) {
+        // TODO: handle disconnect
+        return;
+    }
+
+    switch((enum packet_type)header.type) {
+        case TYPE_SYS_IDENTIFY:
+            strncpy(clients[c].username, payload, MAX_NAME - 1);
+            clients[c].username[MAX_NAME - 1] = '\0';
+            clients[c].is_identified = 1;
+            clients[c].client_id = header.sender_id;
+            break;
+        case TYPE_SYS_JOIN:
+            clients[c].scope_id = header.scope_id;
+            break;
+        case TYPE_SYS_PING:
+            break;
+        default:
+            if (header.expires_at != 0 && header.expires_at < time(NULL))
+                printf("Packet's TTL is expired.\n");
+                break;
+            route_to_scope(header, payload, clients);
+    }
+}
+
+void route_to_scope(struct packet_header header, char *payload,
+    struct client_info *clients)
+{
+    for (int i = 0; i < FD_SETSIZE; i++) {
+        if (
+            clients[i].socket_fd == -1 ||
+            header.sender_id == clients[i].client_id ||
+            clients[i].scope_id != header.scope_id
+        )
+            continue;
+        header.payload_len = htonl(header.payload_len);
+        header.scope_id = htonl(header.scope_id);
+        header.sender_id = htonl(header.sender_id);
+        header.expires_at = htobe64(header.expires_at);
+
+        size_t total_sent = 0;
+        ssize_t bytes_sent;
+        while (total_sent < sizeof(struct packet_header)) {
+            bytes_sent = send(i, buffer + total_sent, length - total_sent, 0);
+            if (bytes_sent == -1) {
+                perror("send");
+                return -1; // failure;
+            }
+            total_sent += bytes_sent;
         }
-
-        payload_total += p;
     }
 }
 
@@ -115,6 +147,20 @@ void handle_new_socket(const int s, int *maxfd, fd_set *main)
     printf("Connected to client on socket %d...\n", client_socket);
     if (client_socket > *maxfd)
         *maxfd = client_socket;
+}
+
+size_t handle_recv(const int c, char *buffer, const size_t size)
+{
+    size_t total = 0;
+    while (total < size) {
+        ssize_t n = recv(c, buffer + total, size - total, 0);
+        if (n == -1) {
+            perror("recv");
+            break;
+        }
+        total += n;
+    }
+    return total;
 }
 
 void init_clients(struct client_info *c)
