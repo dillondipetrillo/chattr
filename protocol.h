@@ -1,6 +1,7 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
+#define MAX_CLIENTS 1024
 #define MAX_NAME 32
 #define MAX_PAYLOAD 1024
 
