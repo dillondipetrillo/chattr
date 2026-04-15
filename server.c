@@ -19,8 +19,11 @@
 
 void handle_client(const int c, struct client_info *clients);
 void handle_new_socket(const int s, int *maxfd, fd_set *main);
-size_t handle_recv(const int c, char *buffer, const size_t size);
+size_t handle_recv(const int c, const char *buffer, const size_t size);
+size_t handle_send(const int c, const char *bytes, const size_t size);
 void init_clients(struct client_info *c);
+void route_to_scope(struct packet_header header, char *payload,
+    struct client_info *clients);
 int setup_server(void);
 
 int main(void)
@@ -60,15 +63,15 @@ int main(void)
 void handle_client(const int c, struct client_info *clients)
 {
     char buffer[sizeof(struct packet_header)];
-    size_t bytes_read = handle_recv(c, buffer, sizeof(struct packet_header));
+    size_t header_read = handle_recv(c, buffer, sizeof(struct packet_header));
 
-    if (bytes_read <= 0) {
+    if (header_read == 0) {
         // TODO: handle disconnect
         return;
     }
 
     struct packet_header header;
-    memcpy(&header, buffer, bytes_read);
+    memcpy(&header, buffer, header_read);
     header.payload_len = ntohl(header.payload_len);
     header.scope_id = ntohl(header.scope_id);
     header.sender_id = ntohl(header.sender_id);
@@ -77,10 +80,11 @@ void handle_client(const int c, struct client_info *clients)
     if (header.payload_len > MAX_PAYLOAD) {
         printf("Payload is too large.\n");
         // TODO: handle disconnect
+        return;
     }
 
     char payload[MAX_PAYLOAD];
-    size_t payload_read = handle_recv(c, payload, sizeof(header.payload_len));
+    size_t payload_read = handle_recv(c, payload, header.payload_len);
 
     if (payload_read <= 0) {
         // TODO: handle disconnect
@@ -100,9 +104,13 @@ void handle_client(const int c, struct client_info *clients)
         case TYPE_SYS_PING:
             break;
         default:
-            if (header.expires_at != 0 && header.expires_at < time(NULL))
+            if (
+                header.expires_at != 0 &&
+                header.expires_at < (uint64_t)time(NULL)
+            ) {
                 printf("Packet's TTL is expired.\n");
                 break;
+            }
             route_to_scope(header, payload, clients);
     }
 }
@@ -110,6 +118,11 @@ void handle_client(const int c, struct client_info *clients)
 void route_to_scope(struct packet_header header, char *payload,
     struct client_info *clients)
 {
+    header.payload_len = htonl(header.payload_len);
+    header.scope_id = htonl(header.scope_id);
+    header.sender_id = htonl(header.sender_id);
+    header.expires_at = htobe64(header.expires_at);
+
     for (int i = 0; i < FD_SETSIZE; i++) {
         if (
             clients[i].socket_fd == -1 ||
@@ -117,22 +130,22 @@ void route_to_scope(struct packet_header header, char *payload,
             clients[i].scope_id != header.scope_id
         )
             continue;
-        header.payload_len = htonl(header.payload_len);
-        header.scope_id = htonl(header.scope_id);
-        header.sender_id = htonl(header.sender_id);
-        header.expires_at = htobe64(header.expires_at);
 
-        size_t total_sent = 0;
-        ssize_t bytes_sent;
-        while (total_sent < sizeof(struct packet_header)) {
-            bytes_sent = send(i, buffer + total_sent, length - total_sent, 0);
-            if (bytes_sent == -1) {
-                perror("send");
-                return -1; // failure;
-            }
-            total_sent += bytes_sent;
+        size_t header_sent = handle_send(i, &header,
+            sizeof(struct packet_header));
+        if (header_sent <= 0) {
+            // TODO: handle disconnection
+            return;
+        }
+
+        size_t payload_sent = handle_send(i, payload, header.payload_len);
+        if (payload_sent <= 0) {
+            // TODO: handle disconnection
+            return;
         }
     }
+
+    return 0;
 }
 
 void handle_new_socket(const int s, int *maxfd, fd_set *main)
@@ -149,7 +162,20 @@ void handle_new_socket(const int s, int *maxfd, fd_set *main)
         *maxfd = client_socket;
 }
 
-size_t handle_recv(const int c, char *buffer, const size_t size)
+size_t handle_send(const int c, const char *bytes, const size_t size)
+{
+    size_t total_sent = 0;
+    ssize_t bytes_sent;
+    while (total_sent < size) {
+        bytes_sent = send(c, bytes + total_sent, size - total_sent, 0);
+        if (bytes_sent == -1)
+            perror("send");
+        total_sent += bytes_sent;
+    }
+    return total_sent;
+}
+
+size_t handle_recv(const int c, const char *buffer, const size_t size)
 {
     size_t total = 0;
     while (total < size) {
