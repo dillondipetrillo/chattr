@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include "protocol.h"
+#include "utils.h"
 
 #if defined(__APPLE__)
     #include <machine/endian.h>
@@ -24,8 +25,6 @@ void disconnect_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
 void handle_new_socket(const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
-ssize_t handle_recv(const int c, char *buffer, const size_t size);
-ssize_t handle_send(const int c, const char *bytes, const size_t size);
 void init_clients(struct client_info *c);
 ssize_t route_to_scope(struct packet_header header, char *payload,
     struct client_info *clients);
@@ -112,8 +111,22 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
         case TYPE_SYS_JOIN:
             clients[c].scope_id = header.scope_id;
             break;
-        case TYPE_SYS_PING:
+        case TYPE_SYS_PING: {
+            struct packet_header response;
+            memset(&response, 0, sizeof(struct packet_header));
+            response.type = TYPE_SYS_PING;
+
+            response.payload_len = htonl(response.payload_len);
+            response.scope_id = htonl(response.scope_id);
+            response.sender_id = htonl(response.sender_id);
+            response.expires_at = htobe64(response.expires_at);
+
+            ssize_t ping_result = handle_send(c, (const char *)&response,
+                sizeof(struct packet_header));
+            if (ping_result == -1)
+                disconnect_client(c, s, maxfd, main, clients);
             break;
+        }
         default:
             if (
                 header.expires_at != 0 &&
@@ -122,7 +135,7 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 printf("Packet's TTL is expired.\n");
                 break;
             }
-            size_t sent = route_to_scope(header, payload, clients);
+            ssize_t sent = route_to_scope(header, payload, clients);
             if (sent == -1) {
                 perror("send");
                 disconnect_client(c, s, maxfd, main, clients);
@@ -168,7 +181,7 @@ ssize_t route_to_scope(struct packet_header header, char *payload,
         if (header_sent == -1)
             return header_sent;
 
-        size_t payload_sent = handle_send(i, payload, payload_len);
+        ssize_t payload_sent = handle_send(i, payload, payload_len);
         if (payload_sent == -1)
             return payload_sent;
 
@@ -202,31 +215,6 @@ void handle_new_socket(const int s, int *maxfd, fd_set *main,
     printf("Connected to client on socket %d...\n", client_socket);
     if (client_socket > *maxfd)
         *maxfd = client_socket;
-}
-
-ssize_t handle_send(const int c, const char *bytes, const size_t size)
-{
-    size_t total_sent = 0;
-    ssize_t bytes_sent;
-    while (total_sent < size) {
-        bytes_sent = send(c, bytes + total_sent, size - total_sent, 0);
-        if (bytes_sent <= 0)
-            return bytes_sent;
-        total_sent += bytes_sent;
-    }
-    return total_sent;
-}
-
-ssize_t handle_recv(const int c, char *buffer, const size_t size)
-{
-    size_t total = 0;
-    while (total < size) {
-        ssize_t n = recv(c, buffer + total, size - total, 0);
-        if (n <= 0)
-            return n;
-        total += n;
-    }
-    return total;
 }
 
 void init_clients(struct client_info *c)
