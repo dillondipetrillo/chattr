@@ -44,12 +44,9 @@ int main(void)
     struct packet_header identify;
     memset(&identify, 0, sizeof(identify));
     identify.type = (uint8_t)TYPE_SYS_IDENTIFY;
-    identify.payload_len = strlen(username);
-    identify.sender_id = socketfd;
-
-    identify.payload_len = htonl(identify.payload_len);
+    identify.payload_len = htonl(strlen(username));
+    identify.sender_id = htonl(socketfd);
     identify.scope_id = htonl(identify.scope_id);
-    identify.sender_id = htonl(identify.sender_id);
     identify.expires_at = htobe64(identify.expires_at);
 
     handle_send(socketfd, (const char *)&identify,
@@ -60,13 +57,9 @@ int main(void)
     struct packet_header join;
     memset(&join, 0, sizeof(join));
     join.type = (uint8_t)TYPE_SYS_JOIN;
-    join.payload_len = sizeof(uint32_t);
-    join.scope_id = scope_id;
-    join.sender_id = socketfd;
-
-    join.payload_len = htonl(join.payload_len);
-    join.scope_id = htonl(join.scope_id);
-    join.sender_id = htonl(join.sender_id);
+    join.payload_len = htonl(sizeof(uint32_t));
+    join.scope_id = htonl(scope_id);
+    join.sender_id = htonl(socketfd);
     join.expires_at = htobe64(join.expires_at);
 
     uint32_t scope_payload = htonl(scope_id);
@@ -88,21 +81,44 @@ int main(void)
         }
 
         if (FD_ISSET(STDIN_FILENO, &readfds)) {
+            /****************************************************************
+             * BURST TEST START                                             *
+             ****************************************************************/
+            // char dummy[10];
+            // fgets(dummy, 10, stdin);
+
+            // for (int i = 0; i <= 500; i++) {
+            //     char burst_message[MAX_PAYLOAD];
+            //     snprintf(burst_message, MAX_PAYLOAD,
+            //         "Packet #%d from Dillon", i);
+
+            //     struct packet_header burst_h;
+            //     memset(&burst_h, 0, sizeof(burst_h));
+            //     burst_h.type = (uint8_t)TYPE_APP_REALTIME;
+            //     burst_h. payload_len = htonl(strlen(burst_message));
+            //     burst_h.scope_id = htonl(scope_id);
+            //     burst_h.sender_id = htonl(socketfd);
+            //     burst_h.expires_at = htobe64(0);
+
+            //     handle_send(socketfd, (const char *)&burst_h,
+            //         sizeof(struct packet_header));
+            //     handle_send(socketfd, burst_message, strlen(burst_message));
+            // }
+            // printf("Sent 500 packets in a burst.\n");
+            /****************************************************************
+             * BURST TEST END                                               *
+             ****************************************************************/
+
             char input[MAX_PAYLOAD];
             if (fgets(input, MAX_PAYLOAD, stdin) == NULL)
                 break;
             struct packet_header send_header;
             memset(&send_header, 0, sizeof(send_header));
             send_header.type = (uint8_t)TYPE_APP_REALTIME;
-            send_header.sender_id = socketfd;
-            send_header.scope_id = scope_id;
-            send_header.payload_len = strlen(input);
-            send_header.expires_at = (uint64_t)time(NULL) + 300;
-
-            send_header.payload_len = htonl(send_header.payload_len);
-            send_header.scope_id = htonl(send_header.scope_id);
-            send_header.sender_id = htonl(send_header.sender_id);
-            send_header.expires_at = htobe64(send_header.expires_at);
+            send_header.sender_id = htonl(socketfd);
+            send_header.scope_id = htonl(scope_id);
+            send_header.payload_len = htonl(strlen(input));
+            send_header.expires_at = htobe64((uint64_t)time(NULL) + 300);
 
             handle_send(socketfd, (const char *)&send_header,
                 sizeof(struct packet_header));

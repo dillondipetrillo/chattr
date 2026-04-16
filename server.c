@@ -99,6 +99,14 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
         return;
     }
 
+    if (header.type != (uint8_t)TYPE_SYS_IDENTIFY &&
+            !clients[c].is_identified) {
+        printf("Client not identified.\n");
+        disconnect_client(c, s, maxfd, main, clients);
+        return;
+    }
+
+    header.sender_id = c;
     switch((enum packet_type)header.type) {
         case TYPE_SYS_IDENTIFY:
             strncpy(clients[c].username, payload, MAX_NAME - 1);
@@ -169,7 +177,8 @@ ssize_t route_to_scope(struct packet_header header, char *payload,
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (
             clients[i].socket_fd == -1 ||
-            clients[i].client_id == sender_id ||
+            // clients[i].client_id == sender_id ||
+            i == (int)sender_id ||
             clients[i].scope_id != scope_id
         )
             continue;
