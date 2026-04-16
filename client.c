@@ -45,7 +45,7 @@ int main(void)
     memset(&identify, 0, sizeof(identify));
     identify.type = (uint8_t)TYPE_SYS_IDENTIFY;
     identify.payload_len = strlen(username);
-    identify.sender_id = 1;
+    identify.sender_id = socketfd;
 
     identify.payload_len = htonl(identify.payload_len);
     identify.scope_id = htonl(identify.scope_id);
@@ -62,7 +62,7 @@ int main(void)
     join.type = (uint8_t)TYPE_SYS_JOIN;
     join.payload_len = sizeof(uint32_t);
     join.scope_id = scope_id;
-    join.sender_id = 1;
+    join.sender_id = socketfd;
 
     join.payload_len = htonl(join.payload_len);
     join.scope_id = htonl(join.scope_id);
@@ -94,7 +94,7 @@ int main(void)
             struct packet_header send_header;
             memset(&send_header, 0, sizeof(send_header));
             send_header.type = (uint8_t)TYPE_APP_REALTIME;
-            send_header.sender_id = 1;
+            send_header.sender_id = socketfd;
             send_header.scope_id = scope_id;
             send_header.payload_len = strlen(input);
             send_header.expires_at = (uint64_t)time(NULL) + 300;
@@ -125,7 +125,7 @@ int main(void)
             }
 
             struct packet_header r_header;
-            memcpy(&r_header, r_buffer, sizeof(recv_header));
+            memcpy(&r_header, r_buffer, sizeof(struct packet_header));
             r_header.payload_len = ntohl(r_header.payload_len);
             r_header.scope_id    = ntohl(r_header.scope_id);
             r_header.sender_id   = ntohl(r_header.sender_id);
