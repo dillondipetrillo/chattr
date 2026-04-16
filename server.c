@@ -17,8 +17,6 @@
     #include <endian.h>
 #endif
 
-#define PORT 8080
-
 void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
 void disconnect_client(const int c, const int s, int *maxfd, fd_set *main,

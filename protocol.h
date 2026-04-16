@@ -4,6 +4,7 @@
 #define MAX_CLIENTS 1024
 #define MAX_NAME 32
 #define MAX_PAYLOAD 1024
+#define PORT 8080
 
 #include <stdint.h>
 #include <time.h>
