@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,6 +6,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "logger.h"
 #include "protocol.h"
 #include "utils.h"
 
@@ -17,20 +19,25 @@
     #include <endian.h>
 #endif
 
-void handle_client(const int c, const int s, int *maxfd, fd_set *main,
+static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
-void disconnect_client(const int c, const int s, int *maxfd, fd_set *main,
+static void disconnect_client(const int c, const int s, int *maxfd,
+    fd_set *main, struct client_info *clients);
+static void handle_new_socket(const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
-void handle_new_socket(const int s, int *maxfd, fd_set *main,
+static void init_clients(struct client_info *c);
+static ssize_t route_to_scope(struct packet_header header, char *payload,
     struct client_info *clients);
-void init_clients(struct client_info *c);
-ssize_t route_to_scope(struct packet_header header, char *payload,
-    struct client_info *clients);
-int setup_server(void);
-int update_maxfd(const int s, const fd_set *main);
+static int setup_server(void);
+static int update_maxfd(const int s, const fd_set *main);
 
 int main(void)
 {
+    if (logger_init("logs/server.log") == -1) {
+        fprintf(stderr, "Failed to initialize logger\n");
+        exit(EXIT_FAILURE);
+    }
+
     struct client_info clients[MAX_CLIENTS];
     int server, maxfd;
     fd_set main, readfds;
@@ -46,7 +53,7 @@ int main(void)
     while (1) {
         readfds = main;
         if (select(maxfd + 1, &readfds, NULL, NULL, NULL) == -1) {
-            perror("select");
+            log_error("select() failed: %s", strerror(errno));
             exit(EXIT_FAILURE);
         }
 
@@ -63,7 +70,7 @@ int main(void)
     return EXIT_SUCCESS;
 }
 
-void handle_client(const int c, const int s, int *maxfd, fd_set *main,
+static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     struct client_info *clients)
 {
     char buffer[sizeof(struct packet_header)];
@@ -71,7 +78,7 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 
     if (header_read <= 0) {
         if (header_read == -1)
-            perror("recv");
+            log_error("recv() failed on client %d: %s", c, strerror(errno));
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -84,7 +91,8 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     header.expires_at = be64toh(header.expires_at);
 
     if (header.payload_len > MAX_PAYLOAD) {
-        printf("Payload is too large.\n");
+        log_error("Client %d sent oversized payload (%u bytes), disconnecting",
+            c, header.payload_len);
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -94,14 +102,15 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 
     if (payload_read <= 0) {
         if (payload_read == -1)
-            perror("recv");
+            log_error("recv() failed on client %d: %s", c, strerror(errno));
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
 
     if (header.type != (uint8_t)TYPE_SYS_IDENTIFY &&
             !clients[c].is_identified) {
-        printf("Client not identified.\n");
+        log_error("Security: Client %d attempted action %u without \
+            identification", c, header.type);
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -138,20 +147,27 @@ void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 header.expires_at != 0 &&
                 header.expires_at < (uint64_t)time(NULL)
             ) {
-                printf("Packet's TTL is expired.\n");
+                log_info("Dropped expired packet from client %d \
+                    (expires_at=%lu, now=%lu)", c, header.expires_at,
+                    (uint64_t)time(NULL));
                 break;
             }
             ssize_t sent = route_to_scope(header, payload, clients);
             if (sent == -1) {
-                perror("send");
+                log_error("send() failed on client %d: %s", c,
+                    strerror(errno));
                 disconnect_client(c, s, maxfd, main, clients);
             }
     }
 }
 
-void disconnect_client(const int c, const int s, int *maxfd, fd_set *main,
-    struct client_info *clients)
+static void disconnect_client(const int c, const int s, int *maxfd,
+    fd_set *main, struct client_info *clients)
 {
+    if (clients[c].is_identified)
+        log_info("Client %d ('%s') disconnected", c, clients[c].username);
+    else
+        log_info("Unidentified client %d disconnected", c);
     close(c);
     memset(&clients[c], 0, sizeof(struct client_info));
     clients[c].socket_fd = -1;
@@ -160,7 +176,7 @@ void disconnect_client(const int c, const int s, int *maxfd, fd_set *main,
         *maxfd = update_maxfd(s, main);
 }
 
-ssize_t route_to_scope(struct packet_header header, char *payload,
+static ssize_t route_to_scope(struct packet_header header, char *payload,
     struct client_info *clients)
 {
     uint32_t sender_id = header.sender_id;
@@ -198,7 +214,7 @@ ssize_t route_to_scope(struct packet_header header, char *payload,
     return routed;
 }
 
-int update_maxfd(const int s, const fd_set *main)
+static int update_maxfd(const int s, const fd_set *main)
 {
     int new_maxfd = s;
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -208,41 +224,41 @@ int update_maxfd(const int s, const fd_set *main)
     return new_maxfd;
 }
 
-void handle_new_socket(const int s, int *maxfd, fd_set *main,
+static void handle_new_socket(const int s, int *maxfd, fd_set *main,
     struct client_info *clients)
 {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
-        perror("accept");
+        log_error("accept() failed: %s", strerror(errno));
         return;
     }
 
     FD_SET(client_socket, main);
     clients[client_socket].socket_fd = client_socket;
-    printf("Connected to client on socket %d...\n", client_socket);
+    log_info("Client connected on socket %d", client_socket);
     if (client_socket > *maxfd)
         *maxfd = client_socket;
 }
 
-void init_clients(struct client_info *c)
+static void init_clients(struct client_info *c)
 {
     memset(c, 0, sizeof(struct client_info) * MAX_CLIENTS);
     for (int i = 0; i < MAX_CLIENTS; i++)
         c[i].socket_fd = -1;
 }
 
-int setup_server(void)
+static int setup_server(void)
 {
     int server_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        perror("socket");
+        log_error("socket() failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     int opt = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt,
             sizeof(opt)) == -1)
-        perror("setsockopt");
+        log_error("setsockopt() failed: %s", strerror(errno));
 
     struct sockaddr_in address;
     memset(&address, 0, sizeof(address));
@@ -252,12 +268,12 @@ int setup_server(void)
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
-        perror("bind");
+        log_error("bind() failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, 4) == -1) {
-        perror("listen");
+        log_error("listen() failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
 

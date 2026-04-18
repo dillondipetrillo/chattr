@@ -5,6 +5,9 @@ client
 # Obect files
 *.o
 
+# Runtime log files
+logs/
+
 # Mac filesystem noise
 .DS_Store
 *.dSYM
