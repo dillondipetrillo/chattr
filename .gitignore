@@ -1,0 +1,15 @@
+# Compiled binaries
+server
+client
+
+# Obect files
+*.o
+
+# Mac filesystem noise
+.DS_Store
+*.dSYM
+
+# Editor artifacts
+.vscode/
+*.swp
+*.swo
