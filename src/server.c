@@ -53,7 +53,8 @@ int main(void)
     while (1) {
         readfds = main;
         if (select(maxfd + 1, &readfds, NULL, NULL, NULL) == -1) {
-            log_error("select() failed: %s", strerror(errno));
+            int saved_errno = errno;
+            log_error("select() failed: %s", strerror(saved_errno));
             exit(EXIT_FAILURE);
         }
 
@@ -77,8 +78,11 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     ssize_t header_read = handle_recv(c, buffer, sizeof(struct packet_header));
 
     if (header_read <= 0) {
-        if (header_read == -1)
-            log_error("recv() failed on client %d: %s", c, strerror(errno));
+        if (header_read == -1) {
+            int saved_errno = errno;
+            log_error("recv() failed on client %d: %s", c,
+                strerror(saved_errno));
+        }
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -101,8 +105,11 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     ssize_t payload_read = handle_recv(c, payload, header.payload_len);
 
     if (payload_read <= 0) {
-        if (payload_read == -1)
-            log_error("recv() failed on client %d: %s", c, strerror(errno));
+        if (payload_read == -1) {
+            int saved_errno = errno;
+            log_error("recv() failed on client %d: %s", c,
+                strerror(saved_errno));
+        }
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -122,9 +129,14 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             clients[c].username[MAX_NAME - 1] = '\0';
             clients[c].is_identified = 1;
             clients[c].client_id = header.sender_id;
+
+            log_info("Client %d identified as %s", c, clients[c].username);
             break;
         case TYPE_SYS_JOIN:
             clients[c].scope_id = header.scope_id;
+
+            log_info("Client %d (%s) joined %u", c, clients[c].username,
+                header.scope_id);
             break;
         case TYPE_SYS_PING: {
             struct packet_header response;
@@ -154,8 +166,9 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             }
             ssize_t sent = route_to_scope(header, payload, clients);
             if (sent == -1) {
+                int saved_errno = errno;
                 log_error("send() failed on client %d: %s", c,
-                    strerror(errno));
+                    strerror(saved_errno));
                 disconnect_client(c, s, maxfd, main, clients);
             }
     }
@@ -229,7 +242,8 @@ static void handle_new_socket(const int s, int *maxfd, fd_set *main,
 {
     int client_socket = accept(s, NULL, NULL);
     if (client_socket == -1) {
-        log_error("accept() failed: %s", strerror(errno));
+        int saved_errno = errno;
+        log_error("accept() failed: %s", strerror(saved_errno));
         return;
     }
 
@@ -251,14 +265,17 @@ static int setup_server(void)
 {
     int server_fd = socket(PF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        log_error("socket() failed: %s", strerror(errno));
+        int saved_errno = errno;
+        log_error("socket() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
     int opt = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt,
-            sizeof(opt)) == -1)
-        log_error("setsockopt() failed: %s", strerror(errno));
+            sizeof(opt)) == -1) {
+        int saved_errno = errno;
+        log_error("setsockopt() failed: %s", strerror(saved_errno));
+    }
 
     struct sockaddr_in address;
     memset(&address, 0, sizeof(address));
@@ -268,12 +285,14 @@ static int setup_server(void)
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
-        log_error("bind() failed: %s", strerror(errno));
+        int saved_errno = errno;
+        log_error("bind() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
     if (listen(server_fd, 4) == -1) {
-        log_error("listen() failed: %s", strerror(errno));
+        int saved_errno = errno;
+        log_error("listen() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
