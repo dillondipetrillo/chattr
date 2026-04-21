@@ -16,7 +16,7 @@ int logger_init(const char *filepath)
         perror("logger_init: fopen");
         return -1;
     }
-    printf("=== Server started ===\n");
+    log_info("=== Server started ===\n");
     return 0;
 }
 

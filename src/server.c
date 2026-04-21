@@ -116,8 +116,8 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 
     if (header.type != (uint8_t)TYPE_SYS_IDENTIFY &&
             !clients[c].is_identified) {
-        log_error("Security: Client %d attempted action %u without \
-            identification", c, header.type);
+        log_error("Security: Client %d attempted action %u without "
+            "identification", c, header.type);
         disconnect_client(c, s, maxfd, main, clients);
         return;
     }
@@ -159,8 +159,8 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 header.expires_at != 0 &&
                 header.expires_at < (uint64_t)time(NULL)
             ) {
-                log_info("Dropped expired packet from client %d \
-                    (expires_at=%lu, now=%lu)", c, header.expires_at,
+                log_info("Dropped expired packet from client %d "
+                    "(expires_at=%lu, now=%lu)", c, header.expires_at,
                     (uint64_t)time(NULL));
                 break;
             }
@@ -206,7 +206,6 @@ static ssize_t route_to_scope(struct packet_header header, char *payload,
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (
             clients[i].socket_fd == -1 ||
-            // clients[i].client_id == sender_id ||
             i == (int)sender_id ||
             clients[i].scope_id != scope_id
         )
@@ -263,15 +262,15 @@ static void init_clients(struct client_info *c)
 
 static int setup_server(void)
 {
-    int server_fd = socket(PF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
+    int server = socket(PF_INET, SOCK_STREAM, 0);
+    if (server == -1) {
         int saved_errno = errno;
         log_error("socket() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
     int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt,
+    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt,
             sizeof(opt)) == -1) {
         int saved_errno = errno;
         log_error("setsockopt() failed: %s", strerror(saved_errno));
@@ -284,17 +283,17 @@ static int setup_server(void)
     address.sin_port = htons(PORT);
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(server_fd, (struct sockaddr *) &address, sizeof(address)) == -1) {
+    if (bind(server, (struct sockaddr *) &address, sizeof(address)) == -1) {
         int saved_errno = errno;
         log_error("bind() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, 4) == -1) {
+    if (listen(server, 4) == -1) {
         int saved_errno = errno;
         log_error("listen() failed: %s", strerror(saved_errno));
         exit(EXIT_FAILURE);
     }
 
-    return server_fd;
+    return server;
 }
