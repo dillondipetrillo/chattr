@@ -41,9 +41,9 @@ static void log_write(const char *level, const char *fmt, va_list args)
     va_list args_copy;
     va_copy(args_copy, args);
 
-    printf("[%s] %-5s ", timestamp, level);
+    fprintf(out, "[%s] %-5s ", timestamp, level);
     vfprintf(out, fmt, args);
-    printf("\n");
+    fprintf(out, "\n");
 
     if (log_file != NULL) {
         fprintf(log_file, "[%s] %-5s ", timestamp, level);
