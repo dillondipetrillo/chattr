@@ -23,7 +23,7 @@ int logger_init(const char *filepath)
 void logger_close(void)
 {
     if (log_file != NULL) {
-        printf("=== Server stopped ===\n");
+        log_info("=== Server stopped ===\n");
         fclose(log_file);
         log_file = NULL;
     }
