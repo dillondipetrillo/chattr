@@ -18,6 +18,9 @@
     #include <endian.h>
 #endif
 
+void send_packet(int socket_fd, enum packet_type packet_t, uint32_t scope,
+    uint64_t expires, const char *payload, size_t payload_len);
+
 int main(void)
 {
     int socketfd = socket(PF_INET, SOCK_STREAM, 0);

@@ -19,15 +19,21 @@
     #include <endian.h>
 #endif
 
-static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
-    struct client_info *clients);
+static int client_in_scope(const struct client_info *client,
+    const uint32_t scope_id);
+static int client_leave_scope(struct client_info *client,
+    const uint32_t scope_id);
 static void disconnect_client(const int c, const int s, int *maxfd,
     fd_set *main, struct client_info *clients);
+static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
+    struct client_info *clients);
 static void handle_new_socket(const int s, int *maxfd, fd_set *main,
     struct client_info *clients);
 static void init_clients(struct client_info *c);
-static ssize_t route_to_scope(struct packet_header header, char *payload,
-    struct client_info *clients);
+static ssize_t route_to_scope(struct packet_header header, const char *payload,
+    const struct client_info *clients);
+static ssize_t send_response(const int c, const enum packet_type type,
+    const enum status_code code);
 static int setup_server(void);
 static int update_maxfd(const int s, const fd_set *main);
 
@@ -69,6 +75,29 @@ int main(void)
     }
 
     return EXIT_SUCCESS;
+}
+
+static int client_in_scope(const struct client_info *client,
+    const uint32_t scope_id)
+{
+    for (int i = 0; i < client->scope_count; i++) {
+        if (client->scopes[i] == scope_id)
+            return 1;
+    }
+    return 0;
+}
+
+static int client_leave_scope(struct client_info *client,
+    const uint32_t scope_id)
+{
+    for (int i = 0; i < client->scope_count; i++) {
+        if (client->scopes[i] == scope_id) {
+            client->scopes[i] = client->scopes[client->scope_count - 1];
+            client->scope_count--;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
@@ -125,19 +154,53 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     header.sender_id = c;
     switch((enum packet_type)header.type) {
         case TYPE_SYS_IDENTIFY:
+            if (clients[c].is_identified) {
+                ssize_t bytes_sent = send_response(c, TYPE_SYS_ERROR,
+                    STATUS_ERR_ALREADY_ID);
+                if (bytes_sent == -1)
+                    disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
+
             strncpy(clients[c].username, payload, MAX_NAME - 1);
             clients[c].username[MAX_NAME - 1] = '\0';
             clients[c].is_identified = 1;
             clients[c].client_id = header.sender_id;
 
             log_info("Client %d identified as %s", c, clients[c].username);
+            ssize_t ok_bytes = send_response(c, TYPE_SYS_ACK, STATUS_OK);
+            if (ok_bytes == -1)
+                disconnect_client(c, s, maxfd, main, clients);
             break;
-        case TYPE_SYS_JOIN:
-            clients[c].scope_id = header.scope_id;
 
+        case TYPE_SYS_JOIN:
+            if (client_in_scope(&clients[c], header.scope_id)) {
+                ssize_t sent_err = send_response(c, TYPE_SYS_ERROR,
+                    STATUS_ERR_ALREADY_IN_ROOM);
+                if (sent_err == -1)
+                    disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
+
+            if (clients[c].scope_count >= MAX_SCOPES) {
+                ssize_t sent_err = send_response(c, TYPE_SYS_ERROR,
+                    STATUS_ERR_SCOPES_FULL);
+                if (sent_err == -1)
+                    disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
+
+            clients[c].scopes[clients[c].scope_count++] = header.scope_id;
+
+            ssize_t ok_sent = send_response(c, TYPE_SYS_ACK, STATUS_OK);
+            if (ok_sent == -1) {
+                disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
             log_info("Client %d (%s) joined %u", c, clients[c].username,
                 header.scope_id);
             break;
+
         case TYPE_SYS_PING: {
             struct packet_header response;
             memset(&response, 0, sizeof(struct packet_header));
@@ -154,23 +217,38 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 disconnect_client(c, s, maxfd, main, clients);
             break;
         }
+
+        case TYPE_SYS_LEAVE:
+            if (!client_leave_scope(&clients[c], header.scope_id)) {
+                ssize_t err_send = send_response(c, TYPE_SYS_ERROR,
+                    STATUS_ERR_NOT_IN_ROOM);
+                if (err_send == -1)
+                    disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
+            ssize_t leave_ok = send_response(c, TYPE_SYS_ACK, STATUS_OK);
+            if (leave_ok == -1)
+                disconnect_client(c, s, maxfd, main, clients);
+            break;
+
         default:
             if (
                 header.expires_at != 0 &&
                 header.expires_at < (uint64_t)time(NULL)
             ) {
+                ssize_t ttl_err = send_response(c, TYPE_SYS_ERROR,
+                    STATUS_ERR_EXPIRED);
+                if (ttl_err == -1)
+                    disconnect_client(c, s, maxfd, main, clients);
+
                 log_info("Dropped expired packet from client %d "
                     "(expires_at=%lu, now=%lu)", c, header.expires_at,
                     (uint64_t)time(NULL));
                 break;
             }
             ssize_t sent = route_to_scope(header, payload, clients);
-            if (sent == -1) {
-                int saved_errno = errno;
-                log_error("send() failed on client %d: %s", c,
-                    strerror(saved_errno));
+            if (sent == -1)
                 disconnect_client(c, s, maxfd, main, clients);
-            }
     }
 }
 
@@ -189,8 +267,8 @@ static void disconnect_client(const int c, const int s, int *maxfd,
         *maxfd = update_maxfd(s, main);
 }
 
-static ssize_t route_to_scope(struct packet_header header, char *payload,
-    struct client_info *clients)
+static ssize_t route_to_scope(struct packet_header header, const char *payload,
+    const struct client_info *clients)
 {
     uint32_t sender_id = header.sender_id;
     uint32_t scope_id = header.scope_id;
@@ -207,7 +285,7 @@ static ssize_t route_to_scope(struct packet_header header, char *payload,
         if (
             clients[i].socket_fd == -1 ||
             i == (int)sender_id ||
-            clients[i].scope_id != scope_id
+            !client_in_scope(&clients[i], scope_id)
         )
             continue;
 
@@ -258,6 +336,40 @@ static void init_clients(struct client_info *c)
     memset(c, 0, sizeof(struct client_info) * MAX_CLIENTS);
     for (int i = 0; i < MAX_CLIENTS; i++)
         c[i].socket_fd = -1;
+}
+
+static ssize_t send_response(const int c, const enum packet_type type,
+    const enum status_code code)
+{
+    struct packet_header header;
+    memset(&header, 0, sizeof(struct packet_header));
+    header.type = (uint8_t)type;
+    header.payload_len = htonl(sizeof(uint32_t));
+    header.scope_id = htonl(header.scope_id);
+    header.sender_id = htonl(header.sender_id);
+    header.expires_at = htobe64(header.expires_at);
+
+    struct response_payload payload;
+    memset(&payload, 0, sizeof(struct response_payload));
+    payload.status_code = htonl((uint32_t)code);
+
+    ssize_t header_sent = handle_send(c, (const char *)&header,
+        sizeof(struct packet_header));
+    if (header_sent == -1) {
+        int saved_errno = errno;
+        log_error("send() failed on client %d: %s", c,
+            strerror(saved_errno));
+        return header_sent;
+    }
+
+    ssize_t payload_sent = handle_send(c, (const char *)&payload,
+        sizeof(struct response_payload));
+    if (payload_sent == -1) {
+        int saved_errno = errno;
+        log_error("send() failed on client %d: %s", c,
+            strerror(saved_errno));
+    }
+    return payload_sent;
 }
 
 static int setup_server(void)
