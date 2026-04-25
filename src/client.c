@@ -18,10 +18,25 @@
     #include <endian.h>
 #endif
 
-void send_packet(int socket_fd, enum packet_type packet_t, uint32_t scope,
-    uint64_t expires, const char *payload, size_t payload_len);
+void send_packet(int socket_fd, enum packet_type type, uint32_t scope,
+    uint64_t expires, const char *payload, size_t payload_len)
+{
+    struct packet_header header;
+    memset(&header, 0, sizeof(struct packet_header));
+    header.type = (uint8_t)type;
+    header.payload_len = htonl(payload_len);
+    header.sender_id = htonl(socket_fd);
+    header.scope_id = htonl(scope);
+    header.expires_at = htobe64(expires);
 
-int main(void)
+    handle_send(socket_fd, (const char *)&header,
+        sizeof(struct packet_header));
+
+    if (payload != NULL && payload_len > 0)
+        handle_send(socket_fd, payload, payload_len);
+}
+
+int main(int argc, char **argv)
 {
     int socketfd = socket(PF_INET, SOCK_STREAM, 0);
     if (socketfd == -1) {
@@ -43,32 +58,42 @@ int main(void)
     }
     printf("Connected to server...\n");
 
-    const char *username = "Dillon";
-    struct packet_header identify;
-    memset(&identify, 0, sizeof(identify));
-    identify.type = (uint8_t)TYPE_SYS_IDENTIFY;
-    identify.payload_len = htonl(strlen(username));
-    identify.sender_id = htonl(socketfd);
-    identify.scope_id = htonl(identify.scope_id);
-    identify.expires_at = htobe64(identify.expires_at);
+    char username[MAX_NAME] = "Guest";
+    if (argc > 1) {
+        strncpy(username, argv[1], MAX_NAME - 1);
+        username[MAX_NAME - 1] = '\0';
+    }
+    uint32_t my_scopes[MAX_SCOPES];
+    int my_scope_count = 0;
+    uint32_t active_scope = 1;
+    if (argc > 2 && my_scope_count < MAX_SCOPES) {
+        active_scope = (uint32_t)strtoul(argv[2], NULL, 10);
+        my_scopes[my_scope_count++] = active_scope;
+    }
+    char pending_name[MAX_NAME] = {0};
+    uint32_t pending_scope = 0;
+    uint32_t pending_leave_scope = 0;
 
-    handle_send(socketfd, (const char *)&identify,
-        sizeof(struct packet_header));
-    handle_send(socketfd, username, strlen(username));
+    send_packet(socketfd, TYPE_SYS_IDENTIFY, active_scope, 0, username,
+        strlen(username));
 
-    uint32_t scope_id = 1;
-    struct packet_header join;
-    memset(&join, 0, sizeof(join));
-    join.type = (uint8_t)TYPE_SYS_JOIN;
-    join.payload_len = htonl(sizeof(uint32_t));
-    join.scope_id = htonl(scope_id);
-    join.sender_id = htonl(socketfd);
-    join.expires_at = htobe64(join.expires_at);
+    uint32_t scope_payload = htonl(active_scope);
+    send_packet(socketfd, TYPE_SYS_JOIN, active_scope, 0,
+        (const char *)&scope_payload, sizeof(uint32_t));
 
-    uint32_t scope_payload = htonl(scope_id);
-    handle_send(socketfd, (const char *)&join, sizeof(struct packet_header));
-    handle_send(socketfd, (const char *)&scope_payload, sizeof(uint32_t));
     printf("Handshake complete.\n");
+
+    /**
+     * // TEMP TEST - join 17 scopes
+    for (int i = 1; i <= 17; i++) {
+        char scope_str[16];
+        snprintf(scope_str, sizeof(scope_str), "%d", i);
+        uint32_t s = (uint32_t)i;
+        send_packet(socketfd, TYPE_SYS_JOIN, s, 0, NULL, 0);
+        // small delay so server processes each one
+        usleep(10000);
+    }
+     */
 
     while (1) {
         fd_set readfds;
@@ -99,7 +124,7 @@ int main(void)
             //     memset(&burst_h, 0, sizeof(burst_h));
             //     burst_h.type = (uint8_t)TYPE_APP_REALTIME;
             //     burst_h. payload_len = htonl(strlen(burst_message));
-            //     burst_h.scope_id = htonl(scope_id);
+            //     burst_h.scope_id = htonl(active_scope);
             //     burst_h.sender_id = htonl(socketfd);
             //     burst_h.expires_at = htobe64(0);
 
@@ -115,17 +140,59 @@ int main(void)
             char input[MAX_PAYLOAD];
             if (fgets(input, MAX_PAYLOAD, stdin) == NULL)
                 break;
-            struct packet_header send_header;
-            memset(&send_header, 0, sizeof(send_header));
-            send_header.type = (uint8_t)TYPE_APP_REALTIME;
-            send_header.sender_id = htonl(socketfd);
-            send_header.scope_id = htonl(scope_id);
-            send_header.payload_len = htonl(strlen(input));
-            send_header.expires_at = htobe64((uint64_t)time(NULL) + 300);
+            input[strcspn(input, "\n\r")] = '\0';
 
-            handle_send(socketfd, (const char *)&send_header,
-                sizeof(struct packet_header));
-            handle_send(socketfd, input, strlen(input));
+            if (input[0] == '/') {
+                char cmd[32] = {0};
+                char arg[MAX_PAYLOAD] = {0};
+                sscanf(input, "%31s %1023s", cmd, arg);
+
+                if (strcmp(cmd, "/nick") == 0) {
+                    if (arg[0] == '\0')
+                        printf("Usage: /nick <name>\n");
+                    else {
+                        strncpy(pending_name, arg, MAX_NAME - 1);
+                        pending_name[MAX_NAME - 1] = '\0';
+                        send_packet(socketfd, TYPE_SYS_IDENTIFY, 0, 0, arg,
+                            strlen(arg));
+                    }
+                } else if (strcmp(cmd, "/join") == 0) {
+                    if (arg[0] == '\0')
+                        printf("Usage: /join <scope_id>\n");
+                    else {
+                        pending_scope = (uint32_t)strtoul(arg, NULL,
+                            10);
+                        send_packet(socketfd, TYPE_SYS_JOIN, pending_scope, 0,
+                            NULL, 0);
+                    }
+                } else if (strcmp(cmd, "/leave") == 0) {
+                    if (arg[0] == '\0')
+                        printf("Usage: /leave <scope_id>\n");
+                    else {
+                        uint32_t leave_scope = (uint32_t)strtoul(arg, NULL,
+                            10);
+                        pending_leave_scope = leave_scope;
+                        send_packet(socketfd, TYPE_SYS_LEAVE, leave_scope, 0,
+                            NULL, 0);
+                    }
+                } else if (strcmp(cmd, "/status") == 0) {
+                    printf("[Status] Name %s | Active scope: %u | "
+                        "In %d scope(s)\n", username, active_scope,
+                        my_scope_count);
+                } else {
+                    printf("Unknown command: %s\n", cmd);
+                    printf("Commands: /nick <name>, /join <id>, "
+                        "/leave <id>, /status\n");
+                }
+            } else {
+                if (active_scope == 0) {
+                    printf("You must /join a scope before sending "
+                        "messsages.\n");
+                } else {
+                    send_packet(socketfd, TYPE_APP_REALTIME, active_scope,
+                        (uint64_t)time(NULL) - 1, input, strlen(input));
+                }
+            }
         }
 
         if (FD_ISSET(socketfd, &readfds)) {
@@ -151,26 +218,107 @@ int main(void)
             r_header.expires_at  = be64toh(r_header.expires_at);
 
             if (r_header.payload_len > MAX_PAYLOAD) {
-                printf("Payload is too large to receieve.\n");
+                printf("Received oversized payload, disconnecting.\n");
                 exit(EXIT_FAILURE);
             }
 
             char r_payload[MAX_PAYLOAD + 1];
-            ssize_t recv_payload = handle_recv(socketfd, r_payload,
-                r_header.payload_len);
+            memset(r_payload, 0, sizeof(r_payload));
 
-            if (recv_payload == 0) {
-                printf("Server disconnected.\n");
-                exit(EXIT_SUCCESS);
+            if (r_header.payload_len > 0) {
+                ssize_t recv_payload = handle_recv(socketfd, r_payload,
+                    r_header.payload_len);
+
+                if (recv_payload == 0) {
+                    printf("Server disconnected.\n");
+                    exit(EXIT_SUCCESS);
+                }
+                if (recv_payload == -1) {
+                    perror("recv");
+                    exit(EXIT_FAILURE);
+                }
             }
-                
-            if (recv_payload == -1) {
-                perror("recv");
-                exit(EXIT_FAILURE);
+
+            switch ((enum packet_type)r_header.type) {
+                case TYPE_SYS_ACK: {
+                    struct response_payload *rp =
+                        (struct response_payload *)r_payload;
+                    uint32_t code = ntohl(rp->status_code);
+                    (void)code;
+
+                    if (pending_scope != 0) {
+                        active_scope = pending_scope;
+                        if (my_scope_count < MAX_SCOPES)
+                            my_scopes[my_scope_count++] = pending_scope;
+                        printf("[OK] Joined scope %u\n", active_scope);
+                        pending_scope = 0;
+                    } else if (pending_leave_scope != 0) {
+                        for (int j = 0; j < my_scope_count; j++) {
+                            if (my_scopes[j] == pending_leave_scope) {
+                                my_scopes[j] = my_scopes[my_scope_count - 1];
+                                my_scope_count--;
+                                break;
+                            }
+                        }
+                        if (active_scope == pending_leave_scope)
+                            active_scope = 0;
+                        printf("[OK] Left scope %u\n", pending_leave_scope);
+                        pending_leave_scope = 0;
+                    } else if (pending_name[0] != '\0') {
+                        strncpy(username, pending_name, MAX_NAME - 1);
+                        username[MAX_NAME - 1] = '\0';
+                        printf("[OK] Name is set to %s\n", username);
+                        pending_name[0] = '\0';
+                    } else {
+                        printf("[OK] Operation succeeded.\n");
+                    }
+                    break;
+                }
+                case TYPE_SYS_ERROR: {
+                    struct response_payload *rp = 
+                        (struct response_payload *)r_payload;
+                    uint32_t code = ntohl(rp->status_code);
+
+                    pending_scope = 0;
+                    pending_leave_scope = 0;
+                    pending_name[0] = '\0';
+
+                    switch (code) {
+                        case STATUS_ERR_UNIDENTIFIED:
+                            printf("[ERROR] You must /nick before doing that.\n");
+                            break;
+                        case STATUS_ERR_ALREADY_ID:
+                            printf("[ERROR] Already identified.\n");
+                            break;
+                        case STATUS_ERR_ROOM_FULL:
+                            printf("[ERROR] You are in the maximum number "
+                                "of rooms.\n");
+                            break;
+                        case STATUS_ERR_ALREADY_IN_ROOM:
+                            printf("[ERROR] You are already in that room.\n");
+                            break;
+                        case STATUS_ERR_NOT_IN_ROOM:
+                            printf("[ERROR] You are not in that room.\n");
+                            break;
+                        case STATUS_ERR_EXPIRED:
+                            printf("[ERROR] Packet expired before delivery.\n");
+                            break;
+                        case STATUS_ERR_SCOPES_FULL:
+                            printf("[ERROR] Maximum scopes reached.\n");
+                            break;
+                        default:
+                            printf("[ERROR] Unknown error code %u\n", code);
+                            break; 
+                    }
+                    break;
+                }
+                case TYPE_SYS_PING:
+                    break;
+                default:
+                    r_payload[r_header.payload_len] = '\0';
+                    printf("Message: %s\n", r_payload);
+                    break;
             }
-                
-            r_payload[r_header.payload_len] = '\0';
-            printf("Message: %s\n", r_payload);
         }
     }
 

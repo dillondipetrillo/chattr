@@ -131,29 +131,33 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     }
 
     char payload[MAX_PAYLOAD];
-    ssize_t payload_read = handle_recv(c, payload, header.payload_len);
+    memset(&payload, 0, sizeof(payload));
 
-    if (payload_read <= 0) {
-        if (payload_read == -1) {
-            int saved_errno = errno;
-            log_error("recv() failed on client %d: %s", c,
-                strerror(saved_errno));
+    if (header.payload_len > 0) {
+        ssize_t payload_read = handle_recv(c, payload, header.payload_len);
+    
+        if (payload_read <= 0) {
+            if (payload_read == -1) {
+                int saved_errno = errno;
+                log_error("recv() failed on client %d: %s", c,
+                    strerror(saved_errno));
+            }
+            disconnect_client(c, s, maxfd, main, clients);
+            return;
         }
-        disconnect_client(c, s, maxfd, main, clients);
-        return;
     }
 
     if (header.type != (uint8_t)TYPE_SYS_IDENTIFY &&
             !clients[c].is_identified) {
         log_error("Security: Client %d attempted action %u without "
             "identification", c, header.type);
-        disconnect_client(c, s, maxfd, main, clients);
+        send_response(c, TYPE_SYS_ERROR, STATUS_ERR_UNIDENTIFIED);
         return;
     }
 
     header.sender_id = c;
     switch((enum packet_type)header.type) {
-        case TYPE_SYS_IDENTIFY:
+        case TYPE_SYS_IDENTIFY: {
             if (clients[c].is_identified) {
                 ssize_t bytes_sent = send_response(c, TYPE_SYS_ERROR,
                     STATUS_ERR_ALREADY_ID);
@@ -172,8 +176,8 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             if (ok_bytes == -1)
                 disconnect_client(c, s, maxfd, main, clients);
             break;
-
-        case TYPE_SYS_JOIN:
+        }
+        case TYPE_SYS_JOIN: {
             if (client_in_scope(&clients[c], header.scope_id)) {
                 ssize_t sent_err = send_response(c, TYPE_SYS_ERROR,
                     STATUS_ERR_ALREADY_IN_ROOM);
@@ -200,7 +204,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             log_info("Client %d (%s) joined %u", c, clients[c].username,
                 header.scope_id);
             break;
-
+        }
         case TYPE_SYS_PING: {
             struct packet_header response;
             memset(&response, 0, sizeof(struct packet_header));
@@ -217,8 +221,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 disconnect_client(c, s, maxfd, main, clients);
             break;
         }
-
-        case TYPE_SYS_LEAVE:
+        case TYPE_SYS_LEAVE: {
             if (!client_leave_scope(&clients[c], header.scope_id)) {
                 ssize_t err_send = send_response(c, TYPE_SYS_ERROR,
                     STATUS_ERR_NOT_IN_ROOM);
@@ -230,8 +233,8 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             if (leave_ok == -1)
                 disconnect_client(c, s, maxfd, main, clients);
             break;
-
-        default:
+        }
+        default: {
             if (
                 header.expires_at != 0 &&
                 header.expires_at < (uint64_t)time(NULL)
@@ -249,6 +252,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             ssize_t sent = route_to_scope(header, payload, clients);
             if (sent == -1)
                 disconnect_client(c, s, maxfd, main, clients);
+        }
     }
 }
 
