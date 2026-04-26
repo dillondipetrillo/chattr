@@ -35,12 +35,18 @@ Unlike traditional message brokers (Kafka, RabbitMQ) that focus on persistence a
 ## Quick Start
 **1. Build the Ecosystem**
 The project uses a ```Makefile``` to handle complex linking and flags:
-```make clean && make```
+```
+make clean && make
+```
 
 **2. Launch the Bus (Server)**
 Start the central router. By default, it listens on port ```8080```.
-```./server```
+```
+./server
+```
 
 **3. Connect a Node (Client):**
 Open multiple terminals to simulate real-time collaboration:
-```./client```
+```
+./client
+```
