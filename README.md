@@ -1,11 +1,12 @@
-# State Bus C-Engine 
+# State Bus (Flux): The Real-Time Lifecycle Engine
 
-A high-performance, binary-protocol "Dumb Engine" designed for real-time state synchronization. Built in C to provide a low-latency nervous system for collaborative workspaces and ephemeral social applications.
+The State Bus is a high-performance, binary-protocol "Dumb Engine" designed for ultra-low latency state synchronization. Built in C, it serves as the foundational nervous system for collaborative ecosystems that require instantaneous updates and ephemeral data management.
 
-## The Philosophy: "The Dumb Engine"
-Unlike traditional message brokers (Kafka/AWS Event Bridge) that focus on storage and heavy processing, the **State Bus** focuses on **Routing and Decay**. 
-- **Mechanism over Policy:** The server doesn't care what the data is; it only cares where it needs to go and when it expires.
+## The Philosophy: "Dumb" for Speed
+Unlike traditional message brokers (Kafka, RabbitMQ) that focus on persistence and heavy processing, the **State Bus** focuses on **Routing and Decay**.
+- **Mechanism over Policy:** The server is application-agnostic. It doesn't interpret your data; it move bytes based on ```scope_id``` and ```packet_type```.
 - **Hardware-Level TTL:** Native support for Time-To-Live (TTL) functionality, ensuring data expires at the protocol level rather than during background database cleanup.
+- **Zero-Copy Mentality:** Designed to handle high-concurrency bursts (500+ packets) with minimal CPU jitter.
 
 ## Features
 - **Binary Protocol:** Packed C structs for minimal bandwidth overhead.
@@ -13,23 +14,39 @@ Unlike traditional message brokers (Kafka/AWS Event Bridge) that focus on storag
 - **Non-Blocking I/O:** Powered by a high-efficiency `select()` loop.
 - **Identity Gate:** Server-side authority for `sender_id` to prevent identity spoofing.
 - **Stress Tested:** Successfully handles 500+ packet bursts without sync loss.
+- **Scope-Based Routing:** Logical isolation of data (Rooms/Channels) via ```scope_id```.
 
 ## Project Structure
-- `server.c`: The central State Bus router.
-- `client.c`: Terminal-based test client.
-- `protocol.h`: The shared binary protocol definition.
-- `utils.c/h`: Core networking and byte-handling wrappers.
+```
+.
+├── include/           # Header files (The Public API)
+│   ├── protocol.h     # Binary packet definitions & constants
+│   ├── logger.h       # System logging interface
+│   └── utils.h        # Networking wrappers
+├── src/               # Implementation files
+│   ├── server.c       # Core State Bus Router
+│   ├── client.c       # Reference Test Client
+│   ├── logger.c       # Thread-safe logging logic
+│   └── utils.c        # Byte-handling logic
+├── Makefile           # Automated build system
+└── README.md          # System documentation
+```
 
 ## Quick Start
-Currently, this project uses a flat directory structure.
+**1. Build the Ecosystem**
+The project uses a ```Makefile``` to handle complex linking and flags:
+```
+make clean && make
+```
 
-1. **Compile the Server:**
-   `gcc -Wall -Wextra server.c utils.c -o server`
+**2. Launch the Bus (Server)**
+Start the central router. By default, it listens on port ```8080```.
+```
+./server
+```
 
-2. **Compile the Client:**
-   `gcc -Wall -Wextra client.c utils.c -o client`
-
-3. **Run:**
-   - Terminal A: `./server`
-   - Terminal B: `./client` (Receiver)
-   - Terminal C: `./client` (Sender)
+**3. Connect a Node (Client):**
+Open multiple terminals to simulate real-time collaboration:
+```
+./client
+```
