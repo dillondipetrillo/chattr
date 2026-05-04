@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "logger.h"
 #include "protocol.h"
@@ -39,6 +40,8 @@ static int update_maxfd(const int s, const fd_set *main);
 
 int main(void)
 {
+    mkdir("logs", 0755);
+
     if (logger_init("logs/server.log") == -1) {
         fprintf(stderr, "Failed to initialize logger\n");
         exit(EXIT_FAILURE);
