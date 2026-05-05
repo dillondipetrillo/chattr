@@ -1,3 +1,4 @@
+#include <endian.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -10,15 +11,6 @@
 #include "logger.h"
 #include "protocol.h"
 #include "utils.h"
-
-#if defined(__APPLE__)
-    #include <machine/endian.h>
-    #include <libkern/OSByteOrder.h>
-    #define htobe64(x) OSSwapHostToBigInt64(x)
-    #define be64toh(x) OSSwapBigToHostInt64(x)
-#else
-    #include <endian.h>
-#endif
 
 static int client_in_scope(const struct client_info *client,
     const uint32_t scope_id);
@@ -41,7 +33,6 @@ static int update_maxfd(const int s, const fd_set *main);
 int main(void)
 {
     mkdir("logs", 0755);
-
     if (logger_init("logs/server.log") == -1) {
         fprintf(stderr, "Failed to initialize logger\n");
         exit(EXIT_FAILURE);
