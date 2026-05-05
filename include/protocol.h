@@ -24,6 +24,7 @@ enum packet_type {
 
 enum status_code {
     STATUS_OK = 100,
+    STATUS_ERR_AUTH_FAILED = 400,
     STATUS_ERR_UNIDENTIFIED = 401,
     STATUS_ERR_ALREADY_ID = 402,
     STATUS_ERR_ROOM_FULL = 403,
@@ -35,12 +36,13 @@ enum status_code {
 };
 
 struct client_info {
+    int is_authenticated;
+    int scope_count;
     int socket_fd;
     uint32_t client_id;
     uint32_t scopes[MAX_SCOPES];
-    int scope_count;
-    int is_identified;
-    char username[MAX_NAME];
+    uint32_t user_id;
+    char session_token[256];
 };
 
 struct __attribute__((packed)) packet_header {

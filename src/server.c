@@ -8,9 +8,16 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "auth_hook.h"
 #include "logger.h"
 #include "protocol.h"
 #include "utils.h"
+
+struct engine_config {
+    auth_hook_fn auth_hook;
+};
+struct engine_config global_config;
 
 static int client_in_scope(const struct client_info *client,
     const uint32_t scope_id);
@@ -38,6 +45,7 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
+    global_config.auth_hook = default_auth_hook;
     struct client_info clients[MAX_CLIENTS];
     int server, maxfd;
     fd_set main, readfds;
@@ -142,7 +150,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     }
 
     if (header.type != (uint8_t)TYPE_SYS_IDENTIFY &&
-            !clients[c].is_identified) {
+            !clients[c].is_authenticated) {
         log_error("Security: Client %d attempted action %u without "
             "identification", c, header.type);
         send_response(c, TYPE_SYS_ERROR, STATUS_ERR_UNIDENTIFIED);
@@ -152,7 +160,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
     header.sender_id = c;
     switch((enum packet_type)header.type) {
         case TYPE_SYS_IDENTIFY: {
-            if (clients[c].is_identified) {
+            if (clients[c].is_authenticated) {
                 ssize_t bytes_sent = send_response(c, TYPE_SYS_ERROR,
                     STATUS_ERR_ALREADY_ID);
                 if (bytes_sent == -1)
@@ -160,12 +168,22 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 break;
             }
 
-            strncpy(clients[c].username, payload, MAX_NAME - 1);
-            clients[c].username[MAX_NAME - 1] = '\0';
-            clients[c].is_identified = 1;
-            clients[c].client_id = header.sender_id;
+            struct auth_request req = {
+                .token = payload,
+                .token_len = header.payload_len,
+                .connection_id = c
+            };
+            struct auth_result result = global_config.auth_hook(req);
+            if (!result.valid) {
+                send_response(c, TYPE_SYS_ERROR, STATUS_ERR_AUTH_FAILED);
+                disconnect_client(c, s, maxfd, main, clients);
+                break;
+            }
 
-            log_info("Client %d identified as %s", c, clients[c].username);
+            clients[c].is_authenticated = 1;
+            clients[c].user_id = result.user_id;
+
+            log_info("Client %d identified as %u", c, clients[c].user_id);
             ssize_t ok_bytes = send_response(c, TYPE_SYS_ACK, STATUS_OK);
             if (ok_bytes == -1)
                 disconnect_client(c, s, maxfd, main, clients);
@@ -195,7 +213,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
                 disconnect_client(c, s, maxfd, main, clients);
                 break;
             }
-            log_info("Client %d (%s) joined %u", c, clients[c].username,
+            log_info("Client %d (%s) joined %u", c, clients[c].user_id,
                 header.scope_id);
             break;
         }
@@ -253,8 +271,8 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
 static void disconnect_client(const int c, const int s, int *maxfd,
     fd_set *main, struct client_info *clients)
 {
-    if (clients[c].is_identified)
-        log_info("Client %d ('%s') disconnected", c, clients[c].username);
+    if (clients[c].is_authenticated)
+        log_info("Client %d ('%u') disconnected", c, clients[c].user_id);
     else
         log_info("Unidentified client %d disconnected", c);
     close(c);

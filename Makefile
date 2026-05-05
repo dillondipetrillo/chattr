@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -Iinclude
 
-SHARED = src/utils.c src/logger.c
+SHARED = src/utils.c src/logger.c src/auth_hook.c
 
 all: server client
 
