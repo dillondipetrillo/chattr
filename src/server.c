@@ -10,14 +10,15 @@
 #include <unistd.h>
 
 #include "auth_hook.h"
+#include "config.h"
 #include "logger.h"
 #include "protocol.h"
 #include "utils.h"
 
-struct engine_config {
+struct engine_auth {
     auth_hook_fn auth_hook;
 };
-struct engine_config global_config;
+struct engine_auth global_config;
 
 static int client_in_scope(const struct client_info *client,
     const uint32_t scope_id);
@@ -34,7 +35,7 @@ static ssize_t route_to_scope(struct packet_header header, const char *payload,
     const struct client_info *clients);
 static ssize_t send_response(const int c, const enum packet_type type,
     const enum status_code code);
-static int setup_server(void);
+static int setup_server(const struct engine_config *config);
 static int update_maxfd(const int s, const fd_set *main);
 
 int main(void)
@@ -44,6 +45,8 @@ int main(void)
         fprintf(stderr, "Failed to initialize logger\n");
         exit(EXIT_FAILURE);
     }
+    struct engine_config config = config_load();
+    config_log(&config);
 
     global_config.auth_hook = default_auth_hook;
     struct client_info clients[MAX_CLIENTS];
@@ -51,7 +54,7 @@ int main(void)
     fd_set main, readfds;
 
     init_clients(clients);
-    server = setup_server();
+    server = setup_server(&config);
 
     FD_ZERO(&main);
     FD_ZERO(&readfds);
@@ -388,7 +391,7 @@ static ssize_t send_response(const int c, const enum packet_type type,
     return payload_sent;
 }
 
-static int setup_server(void)
+static int setup_server(const struct engine_config *config)
 {
     int server = socket(PF_INET, SOCK_STREAM, 0);
     if (server == -1) {
@@ -408,7 +411,7 @@ static int setup_server(void)
     memset(&address, 0, sizeof(address));
 
     address.sin_family = AF_INET;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(config->port);
     address.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(server, (struct sockaddr *) &address, sizeof(address)) == -1) {

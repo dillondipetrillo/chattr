@@ -1,14 +1,13 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
+#include <stdint.h>
+#include <time.h>
+
 #define MAX_CLIENTS 1024
 #define MAX_NAME 32
 #define MAX_PAYLOAD 1024
 #define MAX_SCOPES 16
-#define PORT 8080
-
-#include <stdint.h>
-#include <time.h>
 
 enum packet_type {
     TYPE_SYS_IDENTIFY = 1,

@@ -7,6 +7,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "config.h"
 #include "protocol.h"
 #include "utils.h"
 
@@ -30,6 +31,7 @@ void send_packet(int socket_fd, enum packet_type type, uint32_t scope,
 
 int main(int argc, char **argv)
 {
+    struct engine_config config = config_load();
     int socketfd = socket(PF_INET, SOCK_STREAM, 0);
     if (socketfd == -1) {
         perror("socket");
@@ -39,7 +41,7 @@ int main(int argc, char **argv)
     struct sockaddr_in address;
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(config.port);
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
 
     if (connect(socketfd, (struct sockaddr *)&address,
