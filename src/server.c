@@ -174,7 +174,7 @@ static void handle_client(const int c, const int s, int *maxfd, fd_set *main,
             struct auth_request req = {
                 .token = payload,
                 .token_len = header.payload_len,
-                .connection_id = c
+                .conn_fd = c
             };
             struct auth_result result = global_config.auth_hook(req);
             if (!result.valid) {
