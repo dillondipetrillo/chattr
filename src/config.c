@@ -32,10 +32,14 @@ struct engine_config config_load(void)
 
     char *env_log = getenv("ENGINE_LOG_PATH") ?
         getenv("ENGINE_LOG_PATH") : "logs/server.log";
+    char *env_billing_log = getenv("ENGINE_BILLING_LOG_PATH") ?
+        getenv("ENGINE_BILLING_LOG_PATH") : "logs/billing.log";
     char *env_auth_socket = getenv("ENGINE_AUTH_SOCKET") ?
         getenv("ENGINE_AUTH_SOCKET") : "";
 
     snprintf(config.log_path, sizeof(config.log_path), "%s", env_log);
+    snprintf(config.billing_log_path, sizeof(config.billing_log_path), "%s",
+        env_billing_log);
     snprintf(config.auth_socket, sizeof(config.auth_socket), "%s",
         env_auth_socket);
 
@@ -58,7 +62,8 @@ void config_log(const struct engine_config *config)
         config->tcp_keepalive_idle, config->tcp_keepalive_intvl,
         config->tcp_keepalive_cnt);
 
-    log_info("Paths         | Log: %s", config->log_path);
+    log_info("Paths         | Log: %s, Billing Log: %s", config->log_path,
+        config->billing_log_path);
 
     // Explicitly check for the empty string sidecar
     log_info("Sidecar       | Auth Socket: %s", 

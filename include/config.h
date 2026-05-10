@@ -16,14 +16,14 @@ struct engine_config {
     int tcp_keepalive_idle;     // seconds before keepalive probes start
     int tcp_keepalive_intvl;    // seconds between keepalive probes
     int tcp_keepalive_cnt;      // probes before declaring dead
-    char log_path[256];         // path to log file
+    char log_path[256];         // path to log file, default logs/server.log
+    char billing_log_path[256]; // default logs/billing.log
     char auth_socket[256];      // unix socket path for auth sidecar
                                 // empty string = use default hook (accept all)
 };
 
 // Load configuration from environment variables with compiled=in defaults
 struct engine_config config_load(void);
-
 // Log all configuration values at startup
 void config_log(const struct engine_config *config);
 

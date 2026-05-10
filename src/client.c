@@ -11,6 +11,8 @@
 #include "protocol.h"
 #include "utils.h"
 
+#define MAX_NAME 32
+
 void send_packet(int socket_fd, enum packet_type type, uint32_t scope,
     uint64_t expires, const char *payload, size_t payload_len)
 {

@@ -6,7 +6,6 @@
 
 #define MAX_BUFF_SIZE 4096
 #define MAX_CLIENTS 1024
-#define MAX_NAME 32
 #define MAX_PAYLOAD 1024
 #define MAX_SCOPES 16
 
@@ -42,7 +41,7 @@ struct client_info {
     uint32_t client_id;
     uint32_t scopes[MAX_SCOPES];
     uint32_t user_id;
-    char recv_bug[MAX_BUFF_SIZE];
+    char recv_buf[MAX_BUFF_SIZE];
     char *send_buf;
     char session_token[256];
     size_t recv_len;
