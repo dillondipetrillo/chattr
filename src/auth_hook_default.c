@@ -12,6 +12,7 @@ struct auth_result default_auth_hook(struct auth_request request)
 
     // Log that default hook was called so it is obvious in development
     log_info("=== Using default auth hook ===");
+    log_info("[DEFAULT AUTH HOOK] ACCEPTS ALL TOKENS — NOT FOR PRODUCTION");
     log_info("Auth result    | valid: %d, user_id: %u",
         result.valid, result.user_id);
     log_info("============================");

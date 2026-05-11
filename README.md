@@ -17,7 +17,7 @@ Unlike traditional message brokers (Kafka, RabbitMQ) that focus on persistence a
 - **Scope-Based Routing:** Logical isolation of data (Rooms/Channels) via ```scope_id```.
 
 ## Auth Service Integration
-**Auth Request** - engine sends this when a client presents a token. Always exactly 256 bytes.
+**Auth Request** - engine sends this when a client presents a token. Always exactly 256 bytes, zero padded.
 ```
 Bytes 0-1:      token_len (uint16_t, network byte order)
 Bytes 2-255:    token data (zero-padded to fill)
@@ -28,7 +28,9 @@ Byte 0:     valid (uint8_t, 1=authenticated 0=rejected)
 Byte 1-4:   user_id (uint32_t, network byte order)
 Byte 5-7:   reserved (must be zero)
 ```
-Auth services must respond within 500ms or the connection is rejected. This protects the engine from a hung auth service.
+Auth services must respond within 500ms or the connection is rejected. This protects the engine from a hung auth service stalling new connections.
+
+```ENGINE_AUTH_SOCKET``` environment variable controls the path. Empty string means use the development hook (accepts everything).
 
 ## Project Structure
 ```
