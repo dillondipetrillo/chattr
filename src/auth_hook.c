@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/time.h>
+#include <unistd.h>
 #include "auth_hook.h"
 #include "logger.h"
 

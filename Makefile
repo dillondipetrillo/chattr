@@ -1,18 +1,22 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -Iinclude
 
-SHARED = src/utils.c src/logger.c src/auth_hook.c src/config.c
+ENGINE_SRCS = src/server.c \
+	src/utils.c \
+	src/logger.c \
+	src/auth_hook.c \
+	src/config.c
 
 all: server client
 
-server: src/server.c $(SHARED)
-	$(CC) $(CFLAGS) -o server src/server.c $(SHARED)
+server: $(ENGINE_SRCS)
+	$(CC) $(CFLAGS) -o server $(ENGINE_SRCS) -lpthread
 
-client: src/client.c $(SHARED)
-	$(CC) $(CFLAGS) -o client src/client.c $(SHARED)
+client: src/client.c src/config.c src/utils.c
+	$(CC) $(CFLAGS) -o client src/client.c src/config.c src/utils.c
 
 clean:
-	rm -f server client
+	rm -f server client server_san
 	rm -rf *.dSYM
 
 .PHONY: all clean
