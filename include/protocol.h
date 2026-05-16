@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <time.h>
 
-#define MAX_BUFF_SIZE 4096
-#define MAX_CLIENTS 1024
+#define MAX_BUFF_SIZE 8192
+#define MAX_CLIENTS 10000
+#define MAX_NAME 32
 #define MAX_PAYLOAD 1024
+#define MAX_SEND_BUFF 65536
 #define MAX_SCOPES 16
 
 enum packet_type {
@@ -16,6 +18,7 @@ enum packet_type {
     TYPE_SYS_ACK = 4,
     TYPE_SYS_ERROR = 5,
     TYPE_SYS_LEAVE = 6,
+    TYPE_SYS_SHUTDOWN = 7,
     TYPE_APP_REALTIME = 10,
     TYPE_APP_STANDARD = 11,
     TYPE_APP_BACKGROUND = 12
@@ -23,13 +26,13 @@ enum packet_type {
 
 enum status_code {
     STATUS_OK = 100,
-    STATUS_ERR_AUTH_FAILED = 400,
     STATUS_ERR_UNIDENTIFIED = 401,
     STATUS_ERR_ALREADY_ID = 402,
-    STATUS_ERR_ROOM_FULL = 403,
+    STATUS_ERR_AUTH_FAILED = 403,
     STATUS_ERR_NOT_IN_ROOM = 404,
     STATUS_ERR_ALREADY_IN_ROOM = 405,
     STATUS_ERR_SCOPES_FULL = 406,
+    STATUS_ERR_ROOM_FULL = 407,
     STATUS_ERR_EXPIRED = 410,
     STATUS_ERR_PAYLOAD_SIZE = 413
 };
@@ -42,11 +45,13 @@ struct client_info {
     uint32_t scopes[MAX_SCOPES];
     uint32_t user_id;
     char recv_buf[MAX_BUFF_SIZE];
-    char *send_buf;
+    char send_buf[MAX_SEND_BUFF];
     char session_token[256];
     size_t recv_len;
     size_t send_len;
     size_t send_offset;
+    uint64_t bytes_sent;
+    uint64_t bytes_recv;
 };
 
 struct __attribute__((packed)) packet_header {
