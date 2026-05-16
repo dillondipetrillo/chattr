@@ -12,8 +12,12 @@ all: server client
 server: $(ENGINE_SRCS)
 	$(CC) $(CFLAGS) -o server $(ENGINE_SRCS) -lpthread
 
-client: src/client.c src/config.c src/utils.c
-	$(CC) $(CFLAGS) -o client src/client.c src/config.c src/utils.c
+client: src/client.c src/config.c src/utils.c src/logger.c
+	$(CC) $(CFLAGS) -o client \
+		src/client.c \
+		src/config.c \
+		src/utils.c \
+		src/logger.c
 
 clean:
 	rm -f server client server_san
