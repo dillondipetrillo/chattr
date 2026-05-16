@@ -9,7 +9,10 @@ server_san
 *.dSYM
 
 # Runtime log files
-logs/
+logs/*
+
+# Do NOT ignore the .gitkeep file in logs
+!logs/.gitkeep
 
 # Go build artifacts
 sidecar/auth-sidecar
