@@ -1,5 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -Iinclude
+LFLAGS = -lpthread -lssl -lcrypto -lcurl
 
 ENGINE_SRCS = src/server.c \
 	src/utils.c \
@@ -10,7 +11,7 @@ ENGINE_SRCS = src/server.c \
 all: server client
 
 server: $(ENGINE_SRCS)
-	$(CC) $(CFLAGS) -o server $(ENGINE_SRCS) -lpthread
+	$(CC) $(CFLAGS) -o server $(ENGINE_SRCS) $(LFLAGS)
 
 client: src/client.c src/config.c src/utils.c src/logger.c
 	$(CC) $(CFLAGS) -o client \
@@ -18,6 +19,10 @@ client: src/client.c src/config.c src/utils.c src/logger.c
 		src/config.c \
 		src/utils.c \
 		src/logger.c
+
+sanitize: $(ENGINE_SRCS)
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -o server_san \
+		$(ENGINE_SRCS) $(LFLAGS)
 
 clean:
 	rm -f server client server_san
