@@ -47,7 +47,7 @@
  * HMAC_Result is a thin wrapper - OpenSSL handles all the complexity:
  * key padding, ipad/opad construction, and two-pass SHA-256.
  */
-static int compute_hmac_sha256(const uint8_t *key, size_t klen,
+int compute_hmac_sha256(const uint8_t *key, size_t klen,
     const uint8_t *msg, size_t mlen, uint8_t *output)
 {
     unsigned int outlen = 0;
