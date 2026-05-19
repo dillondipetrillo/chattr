@@ -68,9 +68,11 @@ struct auth_result {
 // Function pointer type, engine calls this, never knowing the implementation
 typedef struct auth_result (*auth_hook_fn)(struct auth_request request);
 
-// Development hook
-// Default implementation - accepts any token, assigns user_id = conn_fd
-// Use this during development and testing only
+/**
+ * Development hook.
+ * Default implementation - accepts any token, assigns user_id = conn_fd
+ * Use this during development and testing only
+ */
 struct auth_result default_auth_hook(struct auth_request request);
 
 // JWT validation - validates HMAC-SHA256 signed JWT locally
